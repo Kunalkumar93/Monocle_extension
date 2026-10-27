@@ -8,35 +8,109 @@
   let shadowRoot = null;
   let pillElement = null;
   let popoverElement = null;
+  let hostElement = null;
+  let selectionDebounceTimer = null;
 
-  // Initialize Isolated Shadow DOM
-  function initHost() {
-    let host = document.getElementById('omni-ai-companion-root');
-    if (!host) {
-      host = document.createElement('div');
-      host.id = 'omni-ai-companion-root';
-      document.documentElement.appendChild(host);
-    }
-    if (!host.shadowRoot) {
-      shadowRoot = host.attachShadow({ mode: 'open' });
-      injectStyles();
-      createElements();
-    } else {
-      shadowRoot = host.shadowRoot;
+  // Safe Extension Context Checker (detects if extension was reloaded in chrome://extensions)
+  function isContextValid() {
+    try {
+      return typeof chrome !== 'undefined' && !!chrome.runtime && !!chrome.runtime.id;
+    } catch (e) {
+      return false;
     }
   }
 
-  // Inject CSS into Shadow DOM
+  // Safe Message Dispatcher (guards against "Extension context invalidated")
+  function safeSendMessage(payload, callback) {
+    if (!isContextValid()) {
+      cleanupOrphanedScript();
+      return false;
+    }
+    try {
+      chrome.runtime.sendMessage(payload, (response) => {
+        if (chrome.runtime.lastError) {
+          // Extension context or connection closed; suppress uncaught errors
+          return;
+        }
+        if (callback) callback(response);
+      });
+      return true;
+    } catch (err) {
+      cleanupOrphanedScript();
+      return false;
+    }
+  }
+
+  // Cleanup orphaned event listeners when extension is reloaded
+  function cleanupOrphanedScript() {
+    document.removeEventListener('mouseup', handleMouseUp);
+    document.removeEventListener('selectionchange', handleSelectionChange);
+    hidePill();
+    hidePopover();
+  }
+
+  // Initialize Isolated Shadow DOM
+  function initHost() {
+    hostElement = document.getElementById('omni-ai-companion-root');
+    if (!hostElement) {
+      hostElement = document.createElement('div');
+      hostElement.id = 'omni-ai-companion-root';
+      document.documentElement.appendChild(hostElement);
+    }
+    if (!hostElement.shadowRoot) {
+      shadowRoot = hostElement.attachShadow({ mode: 'open' });
+      injectStyles();
+      createElements();
+    } else {
+      shadowRoot = hostElement.shadowRoot;
+    }
+  }
+
+  // Inject CSS into Shadow DOM (Immune to page CSP connect-src restrictions)
   function injectStyles() {
-    const cssUrl = chrome.runtime.getURL('content/content.css');
-    fetch(cssUrl)
-      .then(res => res.text())
-      .then(css => {
-        const style = document.createElement('style');
-        style.textContent = css;
-        shadowRoot.appendChild(style);
-      })
-      .catch(err => console.error('Failed to load OmniAI styles:', err));
+    if (!shadowRoot) return;
+
+    // 1. Core styles embedded directly so elements display instantly without fetch()
+    const coreStyle = document.createElement('style');
+    coreStyle.textContent = `
+      :host { all: initial; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; z-index: 2147483647; }
+      .omni-floating-pill { position: absolute; display: flex; align-items: center; gap: 6px; background: rgba(18, 20, 29, 0.95); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.15); box-shadow: 0 10px 30px rgba(0,0,0,0.5), 0 0 0 1px rgba(99, 102, 241, 0.2); border-radius: 9999px; padding: 5px 8px; z-index: 2147483647; opacity: 0; transform: translateY(6px) scale(0.96); pointer-events: none; transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1); color: #f3f4f6; user-select: none; }
+      .omni-floating-pill.visible { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
+      .omni-pill-brand { display: flex; align-items: center; gap: 6px; padding: 0 6px 0 2px; border-right: 1px solid rgba(255, 255, 255, 0.12); cursor: pointer; }
+      .omni-pill-icon { width: 18px; height: 18px; border-radius: 50%; background: linear-gradient(135deg, #6366f1, #a855f7, #06b6d4); display: flex; align-items: center; justify-content: center; font-size: 10px; }
+      .omni-pill-title { font-size: 12px; font-weight: 700; background: linear-gradient(135deg, #e0e7ff, #c084fc); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+      .omni-btn { display: inline-flex; align-items: center; gap: 5px; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.1); color: #e5e7eb; padding: 5px 10px; border-radius: 9999px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s ease; white-space: nowrap; }
+      .omni-btn:hover { background: rgba(99, 102, 241, 0.25); border-color: rgba(99, 102, 241, 0.5); color: #ffffff; }
+      .omni-btn-primary { background: linear-gradient(135deg, #4f46e5, #7c3aed); border: 1px solid rgba(168, 85, 247, 0.4); color: #ffffff; }
+      .omni-popover { position: absolute; width: 380px; max-width: calc(100vw - 30px); background: rgba(18, 20, 29, 0.96); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 12px; box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(99, 102, 241, 0.25); z-index: 2147483647; opacity: 0; transform: translateY(6px) scale(0.97); pointer-events: none; transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1); display: flex; flex-direction: column; overflow: hidden; color: #f3f4f6; }
+      .omni-popover.visible { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
+      .omni-popover-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: rgba(255, 255, 255, 0.04); border-bottom: 1px solid rgba(255, 255, 255, 0.08); font-size: 12.5px; font-weight: 600; color: #a5b4fc; }
+      .omni-popover-actions { display: flex; align-items: center; gap: 4px; }
+      .omni-icon-btn { background: transparent; border: none; color: #9ca3af; font-size: 13px; cursor: pointer; padding: 4px 6px; border-radius: 4px; }
+      .omni-icon-btn:hover { background: rgba(255, 255, 255, 0.1); color: #ffffff; }
+      .omni-popover-body { padding: 14px; font-size: 13px; line-height: 1.6; max-height: 280px; overflow-y: auto; color: #e5e7eb; }
+      .omni-popover-footer { display: flex; align-items: center; gap: 6px; padding: 10px 14px; background: rgba(255, 255, 255, 0.02); border-top: 1px solid rgba(255, 255, 255, 0.08); }
+      .omni-quick-input { flex: 1; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 6px; padding: 6px 10px; color: #ffffff; font-size: 12px; outline: none; }
+      .omni-quick-input:focus { border-color: #6366f1; }
+      .omni-spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255, 255, 255, 0.3); border-radius: 50%; border-top-color: #6366f1; animation: omni-spin 0.8s linear infinite; margin-right: 8px; vertical-align: middle; }
+      @keyframes omni-spin { to { transform: rotate(360deg); } }
+      .omni-toast { position: absolute; bottom: 50px; left: 50%; transform: translateX(-50%) translateY(10px); background: rgba(16, 185, 129, 0.95); color: #ffffff; padding: 6px 12px; border-radius: 6px; font-size: 11.5px; font-weight: 600; opacity: 0; pointer-events: none; transition: all 0.2s ease; z-index: 10; }
+      .omni-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    `;
+    shadowRoot.appendChild(coreStyle);
+
+    // 2. Link full stylesheet from web_accessible_resources without using fetch()
+    if (isContextValid()) {
+      try {
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.type = 'text/css';
+        link.href = chrome.runtime.getURL('content/content.css');
+        shadowRoot.appendChild(link);
+      } catch (e) {
+        // Fallback core style remains active
+      }
+    }
   }
 
   // Create UI Elements inside Shadow DOM
@@ -181,18 +255,13 @@
     const contentEl = shadowRoot.getElementById('omni-popover-content');
     contentEl.innerHTML = `<p><span class="omni-spinner"></span>Thinking...</p>`;
 
-    chrome.runtime.sendMessage(
+    const sent = safeSendMessage(
       {
         type: 'FETCH_GEMINI_EXPLANATION',
         prompt: promptPrefix,
         text: currentSelectedText
       },
       (response) => {
-        if (chrome.runtime.lastError) {
-          contentEl.innerHTML = `<p style="color: #f87171;">⚠️ Connection error: ${chrome.runtime.lastError.message}</p>`;
-          return;
-        }
-
         if (response && response.success) {
           contentEl.innerHTML = renderMarkdown(response.text);
         } else {
@@ -200,6 +269,10 @@
         }
       }
     );
+
+    if (!sent) {
+      contentEl.innerHTML = `<p style="color: #f87171;">⚠️ Extension was reloaded. Please refresh this page (F5).</p>`;
+    }
   }
 
   // Simple Markdown Renderer
@@ -226,7 +299,7 @@
   // Send selected text to background worker to open side panel
   function openInSidePanel(text) {
     if (!text) return;
-    chrome.runtime.sendMessage({
+    safeSendMessage({
       type: 'OPEN_SIDE_PANEL_WITH_TEXT',
       text: text
     });
@@ -252,20 +325,26 @@
   function syncSelectionToSidePanel(text) {
     if (!text || text.length < 2) return;
     currentSelectedText = text;
-    chrome.runtime.sendMessage({
+    safeSendMessage({
       type: 'SELECTION_CHANGED',
       text: text,
       title: document.title,
       url: window.location.href
-    }).catch(() => {});
+    });
   }
 
-  // Selection change listener (Mouse)
-  document.addEventListener('mouseup', (e) => {
+  // Named mouseup handler with context invalidation protection
+  function handleMouseUp(e) {
+    if (!isContextValid()) {
+      cleanupOrphanedScript();
+      return;
+    }
+
     // If click inside our Shadow DOM, ignore
     if (e.target && e.target.id === 'omni-ai-companion-root') return;
 
     setTimeout(() => {
+      if (!isContextValid()) return;
       const selection = window.getSelection();
       const text = selection ? selection.toString().trim() : '';
 
@@ -277,13 +356,18 @@
         hidePill();
       }
     }, 10);
-  });
+  }
 
-  // Debounced listener for selection changes (Keyboard / Double-click)
-  let selectionDebounceTimer = null;
-  document.addEventListener('selectionchange', () => {
+  // Named selectionchange handler with debounce and context invalidation protection
+  function handleSelectionChange() {
+    if (!isContextValid()) {
+      cleanupOrphanedScript();
+      return;
+    }
+
     clearTimeout(selectionDebounceTimer);
     selectionDebounceTimer = setTimeout(() => {
+      if (!isContextValid()) return;
       const selection = window.getSelection();
       const text = selection ? selection.toString().trim() : '';
       if (text.length >= 2 && !isSelectionInInput(selection)) {
@@ -291,7 +375,11 @@
         syncSelectionToSidePanel(text);
       }
     }, 150);
-  });
+  }
+
+  // Register selection listeners
+  document.addEventListener('mouseup', handleMouseUp);
+  document.addEventListener('selectionchange', handleSelectionChange);
 
   // Check if selection is inside form inputs
   function isSelectionInInput(selection) {
@@ -423,7 +511,7 @@
       cleanupSnip();
 
       if (width >= 20 && height >= 20) {
-        chrome.runtime.sendMessage({
+        safeSendMessage({
           type: 'PROCESS_SNIP_AREA',
           area: {
             x: left,
@@ -493,33 +581,41 @@
   }
 
   // Listen to messages from background worker and side panel
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.type === 'GET_SELECTION') {
-      const selection = window.getSelection();
-      const text = selection ? selection.toString().trim() : currentSelectedText;
-      sendResponse({ text: text || currentSelectedText });
-      return true;
-    }
+  if (isContextValid() && chrome.runtime.onMessage) {
+    try {
+      chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        if (!isContextValid()) return;
 
-    if (message.type === 'GET_PAGE_CONTENT') {
-      const pageData = extractPageContent();
-      sendResponse({ success: true, data: pageData });
-      return true;
-    }
+        if (message.type === 'GET_SELECTION') {
+          const selection = window.getSelection();
+          const text = selection ? selection.toString().trim() : currentSelectedText;
+          sendResponse({ text: text || currentSelectedText });
+          return true;
+        }
 
-    if (message.type === 'START_SNIP') {
-      startSnippingTool();
-      sendResponse({ success: true });
-      return true;
-    }
+        if (message.type === 'GET_PAGE_CONTENT') {
+          const pageData = extractPageContent();
+          sendResponse({ success: true, data: pageData });
+          return true;
+        }
 
-    if (message.type === 'TRIGGER_QUICK_EXPLAIN') {
-      currentSelectedText = message.text || window.getSelection()?.toString() || '';
-      if (currentSelectedText) {
-        openPopover('Explain this clearly and concisely:');
-      }
+        if (message.type === 'START_SNIP') {
+          startSnippingTool();
+          sendResponse({ success: true });
+          return true;
+        }
+
+        if (message.type === 'TRIGGER_QUICK_EXPLAIN') {
+          currentSelectedText = message.text || window.getSelection()?.toString() || '';
+          if (currentSelectedText) {
+            openPopover('Explain this clearly and concisely:');
+          }
+        }
+      });
+    } catch (e) {
+      // Ignore if context is tearing down
     }
-  });
+  }
 
   // Initialize
   initHost();

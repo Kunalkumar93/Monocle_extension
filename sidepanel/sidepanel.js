@@ -433,6 +433,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         base64Image: imageToSend
       },
       (res) => {
+        if (chrome.runtime.lastError) {
+          botMsg.querySelector('.msg-content').innerHTML = `
+            <p style="color: #f87171;">⚠️ ${chrome.runtime.lastError.message}</p>
+          `;
+          chatMessages.scrollTop = chatMessages.scrollHeight;
+          return;
+        }
         if (res && res.success) {
           botMsg.querySelector('.msg-content').innerHTML = renderMarkdown(res.text);
         } else {
@@ -526,6 +533,13 @@ document.addEventListener('DOMContentLoaded', async () => {
           text: currentContextText
         },
         (res) => {
+          if (chrome.runtime.lastError) {
+            botMsg.querySelector('.msg-content').innerHTML = `
+              <p style="color: #f87171;">⚠️ ${chrome.runtime.lastError.message}</p>
+            `;
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            return;
+          }
           if (res && res.success) {
             botMsg.querySelector('.msg-content').innerHTML = renderMarkdown(res.text);
           } else {
@@ -604,6 +618,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     chrome.runtime.sendMessage({ type: 'TEST_GEMINI_KEY', key }, (res) => {
       btnTestKey.disabled = false;
       btnTestKey.textContent = '🔍 Test';
+
+      if (chrome.runtime.lastError) {
+        geminiKeyStatus.style.color = '#f87171';
+        geminiKeyStatus.textContent = `⚠️ ${chrome.runtime.lastError.message}`;
+        return;
+      }
 
       if (res && res.success && res.models && res.models.length > 0) {
         geminiKeyStatus.style.color = '#34d399';

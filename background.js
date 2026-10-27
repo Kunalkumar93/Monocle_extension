@@ -57,12 +57,24 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   } else if (info.menuItemId === 'omni_summarize_page') {
     await saveContextAndOpenPanel(tab.id, '', tab.title, tab.url);
     setTimeout(() => {
-      chrome.runtime.sendMessage({ type: 'TRIGGER_PAGE_TLDR' }).catch(() => {});
+      safeBroadcast({ type: 'TRIGGER_PAGE_TLDR' });
     }, 400);
   } else if (info.menuItemId === 'omni_snip_diagram') {
     chrome.tabs.sendMessage(tab.id, { type: 'START_SNIP' }).catch(() => {});
   }
 });
+
+// Helper: Safe broadcast to sidepanel / extension views (clears lastError if sidepanel isn't open)
+function safeBroadcast(message) {
+  try {
+    chrome.runtime.sendMessage(message, () => {
+      // Accessing chrome.runtime.lastError silences the unhandled error
+      void chrome.runtime.lastError;
+    });
+  } catch (e) {
+    // Service worker tearing down
+  }
+}
 
 // Helper: Save context and open side panel
 async function saveContextAndOpenPanel(tabId, text, title, url) {
@@ -86,10 +98,10 @@ async function saveContextAndOpenPanel(tabId, text, title, url) {
   }
 
   // Notify any active sidepanel listening
-  chrome.runtime.sendMessage({
+  safeBroadcast({
     type: 'CONTEXT_UPDATED',
     data: contextData
-  }).catch(() => {});
+  });
 }
 
 // Listen to messages from content scripts or side panel
@@ -112,10 +124,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       timestamp: Date.now()
     };
     chrome.storage.local.set({ currentContext: contextData });
-    chrome.runtime.sendMessage({
+    safeBroadcast({
       type: 'CONTEXT_UPDATED',
       data: contextData
-    }).catch(() => {});
+    });
     sendResponse({ success: true });
     return true;
   }
@@ -149,7 +161,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         await saveContextAndOpenPanel(tabId, '[Diagram Snip]', sender.tab.title, sender.tab.url);
       }
       setTimeout(() => {
-        chrome.runtime.sendMessage({ type: 'SNIP_READY_FOR_CROP', payload: snipPayload }).catch(() => {});
+        safeBroadcast({ type: 'SNIP_READY_FOR_CROP', payload: snipPayload });
       }, 350);
     });
     sendResponse({ success: true });
