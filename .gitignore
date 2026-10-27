@@ -1,0 +1,12 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Chrome extension internal folders
+_metadata/
+*.crx
+*.pem
+
+# Logs & scratch files
+*.log
+scratch/
