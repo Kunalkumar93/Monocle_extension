@@ -58,6 +58,12 @@
         "default": "Alt+A"
       },
       "description": "Open OmniAI Side Panel"
+    },
+    "snip_diagram": {
+      "suggested_key": {
+        "default": "Alt+S"
+      },
+      "description": "Snip Diagram or Formula"
     }
   }
 }

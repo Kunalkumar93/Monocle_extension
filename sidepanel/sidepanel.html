@@ -62,6 +62,9 @@
         <button class="btn-action-ghost" id="btn-chat-page-mode" title="Chat with entire webpage">
           💬 Chat Page
         </button>
+        <button class="btn-action-ghost btn-snip-accent" id="btn-snip-tool" title="Snip and explain diagram or formula (Alt+S)">
+          📸 Snip
+        </button>
       </div>
     </div>
 
@@ -90,11 +93,27 @@
             <div class="msg-avatar">✨</div>
             <div class="msg-content">
               <strong>Welcome to OmniAI!</strong>
-              <p>Highlight any text in an article and click <strong>Explain</strong> or <strong>Side Panel</strong>. You can ask anything here without leaving your tab.</p>
+              <p>Highlight text or snip any diagram (<strong>📸 Snip</strong> or <code>Alt + S</code>) to ask questions without leaving your tab.</p>
               <div class="free-badge-banner">
                 <span>⚡ <strong>100% Free:</strong> Enter your Google Gemini API key in <strong>⚙️ Settings</strong> for unlimited instant live answers.</span>
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- Snip Preview Card (shown when an image is snipped) -->
+        <div class="snip-preview-container" id="snip-preview-container" style="display: none;">
+          <div class="snip-preview-header">
+            <span class="snip-preview-title">📸 Snipped Visual Area</span>
+            <button class="snip-preview-dismiss" id="btn-dismiss-snip" title="Dismiss snip">✕</button>
+          </div>
+          <div class="snip-preview-body">
+            <img id="snip-preview-img" src="" alt="Snipped diagram" />
+          </div>
+          <div class="snip-action-chips">
+            <button class="chip-btn chip-vision" id="btn-explain-diagram">📊 Explain Diagram</button>
+            <button class="chip-btn chip-vision" id="btn-explain-formula">🧮 Explain Formula</button>
+            <button class="chip-btn chip-vision" id="btn-ocr-text">📝 Transcribe Text/Code</button>
           </div>
         </div>
 

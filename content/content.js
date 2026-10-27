@@ -348,7 +348,118 @@
         openInSidePanel(document.title);
       }
     }
+    // Alt + S shortcut to snip diagram or formula
+    if (e.altKey && (e.key === 's' || e.key === 'S')) {
+      startSnippingTool();
+    }
   });
+
+  // Snipping Tool Implementation
+  let snipOverlay = null;
+
+  function startSnippingTool() {
+    if (snipOverlay) return;
+
+    snipOverlay = document.createElement('div');
+    snipOverlay.className = 'omni-snip-overlay';
+    snipOverlay.innerHTML = `
+      <div class="omni-snip-banner">
+        <span>📸 Drag to snip diagram, chart, or formula • Press <strong>Esc</strong> to cancel</span>
+      </div>
+      <div class="omni-snip-box" id="omni-snip-box" style="display: none;">
+        <span class="omni-snip-dims" id="omni-snip-dims"></span>
+      </div>
+    `;
+
+    shadowRoot.appendChild(snipOverlay);
+
+    const snipBox = snipOverlay.querySelector('#omni-snip-box');
+    const snipDims = snipOverlay.querySelector('#omni-snip-dims');
+
+    let isDragging = false;
+    let startX = 0;
+    let startY = 0;
+
+    const onMouseDown = (e) => {
+      isDragging = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      snipBox.style.left = `${startX}px`;
+      snipBox.style.top = `${startY}px`;
+      snipBox.style.width = '0px';
+      snipBox.style.height = '0px';
+      snipBox.style.display = 'block';
+    };
+
+    const onMouseMove = (e) => {
+      if (!isDragging) return;
+      const currentX = e.clientX;
+      const currentY = e.clientY;
+
+      const left = Math.min(startX, currentX);
+      const top = Math.min(startY, currentY);
+      const width = Math.abs(currentX - startX);
+      const height = Math.abs(currentY - startY);
+
+      snipBox.style.left = `${left}px`;
+      snipBox.style.top = `${top}px`;
+      snipBox.style.width = `${width}px`;
+      snipBox.style.height = `${height}px`;
+      snipDims.textContent = `${Math.round(width)} × ${Math.round(height)} px`;
+    };
+
+    const onMouseUp = (e) => {
+      if (!isDragging) return;
+      isDragging = false;
+
+      const currentX = e.clientX;
+      const currentY = e.clientY;
+
+      const left = Math.min(startX, currentX);
+      const top = Math.min(startY, currentY);
+      const width = Math.abs(currentX - startX);
+      const height = Math.abs(currentY - startY);
+
+      cleanupSnip();
+
+      if (width >= 20 && height >= 20) {
+        chrome.runtime.sendMessage({
+          type: 'PROCESS_SNIP_AREA',
+          area: {
+            x: left,
+            y: top,
+            width,
+            height,
+            dpr: window.devicePixelRatio || 1,
+            viewportWidth: window.innerWidth,
+            viewportHeight: window.innerHeight
+          }
+        });
+      }
+    };
+
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        cleanupSnip();
+      }
+    };
+
+    function cleanupSnip() {
+      if (snipOverlay) {
+        snipOverlay.removeEventListener('mousedown', onMouseDown);
+        window.removeEventListener('mousemove', onMouseMove);
+        window.removeEventListener('mouseup', onMouseUp);
+        window.removeEventListener('keydown', onKeyDown);
+        snipOverlay.remove();
+        snipOverlay = null;
+      }
+    }
+
+    snipOverlay.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    window.addEventListener('keydown', onKeyDown);
+  }
 
   // Clean Page Content Extraction for Full Page TL;DR & Chat
   function extractPageContent() {
@@ -393,6 +504,12 @@
     if (message.type === 'GET_PAGE_CONTENT') {
       const pageData = extractPageContent();
       sendResponse({ success: true, data: pageData });
+      return true;
+    }
+
+    if (message.type === 'START_SNIP') {
+      startSnippingTool();
+      sendResponse({ success: true });
       return true;
     }
 

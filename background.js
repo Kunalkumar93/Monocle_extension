@@ -24,6 +24,22 @@ chrome.runtime.onInstalled.addListener(() => {
     title: '📄 OmniAI: 30s TL;DR of Page',
     contexts: ['page']
   });
+
+  chrome.contextMenus.create({
+    id: 'omni_snip_diagram',
+    title: '📸 OmniAI: Snip Diagram / Formula (Alt+S)',
+    contexts: ['page', 'image']
+  });
+});
+
+// Keyboard Command Listener (Alt + S)
+chrome.commands.onCommand.addListener(async (command) => {
+  if (command === 'snip_diagram') {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab && tab.id) {
+      chrome.tabs.sendMessage(tab.id, { type: 'START_SNIP' }).catch(() => {});
+    }
+  }
 });
 
 // Handle Context Menu clicks
@@ -43,6 +59,8 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     setTimeout(() => {
       chrome.runtime.sendMessage({ type: 'TRIGGER_PAGE_TLDR' }).catch(() => {});
     }, 400);
+  } else if (info.menuItemId === 'omni_snip_diagram') {
+    chrome.tabs.sendMessage(tab.id, { type: 'START_SNIP' }).catch(() => {});
   }
 });
 
@@ -102,6 +120,49 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'START_SNIP_REQUEST') {
+    chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
+      if (tab && tab.id) {
+        chrome.tabs.sendMessage(tab.id, { type: 'START_SNIP' }).catch(() => {});
+      }
+    });
+    sendResponse({ success: true });
+    return true;
+  }
+
+  if (message.type === 'PROCESS_SNIP_AREA') {
+    const tabId = sender.tab ? sender.tab.id : null;
+    chrome.tabs.captureVisibleTab(null, { format: 'png' }, async (dataUrl) => {
+      if (chrome.runtime.lastError || !dataUrl) {
+        console.error('Failed to capture screen:', chrome.runtime.lastError);
+        return;
+      }
+      const snipPayload = {
+        dataUrl,
+        area: message.area,
+        title: sender.tab?.title || 'Diagram',
+        url: sender.tab?.url || '',
+        timestamp: Date.now()
+      };
+      await chrome.storage.local.set({ lastSnipPayload: snipPayload });
+      if (tabId) {
+        await saveContextAndOpenPanel(tabId, '[Diagram Snip]', sender.tab.title, sender.tab.url);
+      }
+      setTimeout(() => {
+        chrome.runtime.sendMessage({ type: 'SNIP_READY_FOR_CROP', payload: snipPayload }).catch(() => {});
+      }, 350);
+    });
+    sendResponse({ success: true });
+    return true;
+  }
+
+  if (message.type === 'FETCH_GEMINI_VISION') {
+    handleGeminiVision(message.prompt, message.base64Image)
+      .then((result) => sendResponse({ success: true, text: result }))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
   if (message.type === 'FETCH_GEMINI_EXPLANATION') {
     handleGeminiExplanation(message.prompt, message.text)
       .then((result) => sendResponse({ success: true, text: result }))
@@ -120,6 +181,79 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ status: 'ready' });
   }
 });
+
+// Vision Analysis using Gemini Multimodal
+async function handleGeminiVision(prompt, base64Image) {
+  const { geminiApiKey, geminiModel } = await chrome.storage.local.get(['geminiApiKey', 'geminiModel']);
+
+  if (!geminiApiKey || !geminiApiKey.trim()) {
+    throw new Error('Please enter your free Google Gemini API key in Settings to analyze diagrams and formulas.');
+  }
+
+  // Strip data URL prefix if present
+  const cleanBase64 = base64Image.replace(/^data:image\/[a-z]+;base64,/, '');
+
+  const payload = {
+    contents: [
+      {
+        parts: [
+          {
+            inlineData: {
+              mimeType: 'image/png',
+              data: cleanBase64
+            }
+          },
+          {
+            text: prompt || 'Analyze this technical diagram, chart, or mathematical formula. Break down its components, flow, meaning, and key concepts in clear, structured markdown:'
+          }
+        ]
+      }
+    ],
+    generationConfig: {
+      temperature: 0.2,
+      maxOutputTokens: 800
+    }
+  };
+
+  const cleanKey = geminiApiKey.trim();
+  const { workingGeminiModel, workingGeminiVersion } = await chrome.storage.local.get(['workingGeminiModel', 'workingGeminiVersion']);
+  
+  const candidates = [
+    workingGeminiModel,
+    geminiModel && geminiModel !== 'auto' ? geminiModel : null,
+    'gemini-2.0-flash',
+    'gemini-2.5-flash',
+    'gemini-2.0-flash-lite',
+    'gemini-1.5-flash-latest'
+  ].filter(Boolean);
+
+  let lastError = null;
+  for (const model of [...new Set(candidates)]) {
+    for (const ver of [workingGeminiVersion || 'v1beta', 'v1']) {
+      try {
+        const cleanName = model.replace(/^models\//, '');
+        const url = `https://generativelanguage.googleapis.com/${ver}/models/${cleanName}:generateContent?key=${cleanKey}`;
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.candidates && data.candidates[0]?.content?.parts?.[0]?.text) {
+          chrome.storage.local.set({ workingGeminiModel: cleanName, workingGeminiVersion: ver });
+          return data.candidates[0].content.parts[0].text;
+        }
+        if (data.error) {
+          lastError = new Error(data.error.message || 'Vision API Error');
+        }
+      } catch (err) {
+        lastError = err;
+      }
+    }
+  }
+
+  throw lastError || new Error('Failed to analyze diagram with Gemini Vision.');
+}
 
 // Test connection and retrieve authorized models
 async function testGeminiKey(apiKey) {

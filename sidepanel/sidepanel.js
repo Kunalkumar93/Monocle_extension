@@ -29,6 +29,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   const chatInput = document.getElementById('chat-input');
   const chatSendBtn = document.getElementById('chat-send-btn');
 
+  // Snip Tool Elements
+  const btnSnipTool = document.getElementById('btn-snip-tool');
+  const snipPreviewContainer = document.getElementById('snip-preview-container');
+  const snipPreviewImg = document.getElementById('snip-preview-img');
+  const btnDismissSnip = document.getElementById('btn-dismiss-snip');
+  const btnExplainDiagram = document.getElementById('btn-explain-diagram');
+  const btnExplainFormula = document.getElementById('btn-explain-formula');
+  const btnOcrText = document.getElementById('btn-ocr-text');
+  let currentCroppedBase64 = null;
+
   // Header action elements
   const btnPopout = document.getElementById('btn-popout');
   const btnRefresh = document.getElementById('btn-refresh');
@@ -77,7 +87,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     'customEndpoint',
     'defaultEngine',
     'lastEngine',
-    'currentContext'
+    'currentContext',
+    'lastSnipPayload'
   ]);
 
   if (storage.geminiApiKey) inputGeminiKey.value = storage.geminiApiKey;
@@ -96,6 +107,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Check if context text is available
   if (storage.currentContext && storage.currentContext.text) {
     updateContextDisplay(storage.currentContext.text);
+  }
+
+  // Check if there is a fresh unhandled snip payload (< 2 minutes old)
+  if (storage.lastSnipPayload && storage.lastSnipPayload.dataUrl) {
+    const age = Date.now() - (storage.lastSnipPayload.timestamp || 0);
+    if (age < 120000) {
+      handleNewSnipPayload(storage.lastSnipPayload);
+    }
   }
 
   // 2. Tab Switching Logic
@@ -324,23 +343,157 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
-  // 4. Native Fast AI Chat Logic
-  chatSendBtn.addEventListener('click', () => {
+  // 4. Visual Snip Cropping & Handlers
+  function cropScreenshot(dataUrl, area) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const scale = (area.viewportWidth && img.naturalWidth)
+            ? (img.naturalWidth / area.viewportWidth)
+            : (area.dpr || window.devicePixelRatio || 1);
+
+          const cropX = Math.max(0, Math.round(area.x * scale));
+          const cropY = Math.max(0, Math.round(area.y * scale));
+          const cropW = Math.min(img.naturalWidth - cropX, Math.round(area.width * scale));
+          const cropH = Math.min(img.naturalHeight - cropY, Math.round(area.height * scale));
+
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, cropW);
+          canvas.height = Math.max(1, cropH);
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+          resolve(canvas.toDataURL('image/png'));
+        } catch (err) {
+          reject(err);
+        }
+      };
+      img.onerror = (e) => reject(e);
+      img.src = dataUrl;
+    });
+  }
+
+  async function handleNewSnipPayload(payload) {
+    if (!payload || !payload.dataUrl || !payload.area) return;
+    try {
+      const croppedUrl = await cropScreenshot(payload.dataUrl, payload.area);
+      currentCroppedBase64 = croppedUrl;
+      if (snipPreviewImg) snipPreviewImg.src = croppedUrl;
+      if (snipPreviewContainer) snipPreviewContainer.style.display = 'flex';
+      switchEngine('fast-ai');
+      showToast('📸 Visual area captured! Pick an action below or ask a question.');
+    } catch (e) {
+      console.error('Failed to crop snip screenshot:', e);
+    }
+  }
+
+  function dismissCurrentSnip() {
+    currentCroppedBase64 = null;
+    if (snipPreviewImg) snipPreviewImg.src = '';
+    if (snipPreviewContainer) snipPreviewContainer.style.display = 'none';
+    chrome.storage.local.remove('lastSnipPayload');
+  }
+
+  if (btnSnipTool) {
+    btnSnipTool.addEventListener('click', () => {
+      chrome.runtime.sendMessage({ type: 'START_SNIP_REQUEST' });
+      showToast('Crosshair active: Click & drag to snip diagram or formula.');
+    });
+  }
+
+  if (btnDismissSnip) {
+    btnDismissSnip.addEventListener('click', dismissCurrentSnip);
+  }
+
+  async function sendVisionRequest(prompt, label) {
+    if (!currentCroppedBase64) {
+      showToast('No active snip image.');
+      return;
+    }
+
+    const imageToSend = currentCroppedBase64;
+    dismissCurrentSnip();
+
+    // Display user message with thumbnail
+    const userHtml = `
+      <div class="user-snip-preview">
+        <img src="${imageToSend}" class="msg-thumbnail" alt="Snipped area" />
+        <div><strong>${label}</strong></div>
+      </div>
+    `;
+    appendMessage('user', userHtml, true);
+
+    // Bot placeholder
+    const botMsg = appendMessage('bot', '<span class="omni-spinner"></span>Analyzing visual content with Gemini Vision...', true);
+
+    chrome.runtime.sendMessage(
+      {
+        type: 'FETCH_GEMINI_VISION',
+        prompt,
+        base64Image: imageToSend
+      },
+      (res) => {
+        if (res && res.success) {
+          botMsg.querySelector('.msg-content').innerHTML = renderMarkdown(res.text);
+        } else {
+          botMsg.querySelector('.msg-content').innerHTML = `
+            <p style="color: #f87171;">⚠️ ${(res && res.error) || 'Failed to analyze image'}</p>
+            <p style="font-size: 11.5px; margin-top: 4px; color: #9ca3af;">
+              Ensure your free Google Gemini API key is configured in <strong>⚙️ Settings</strong>.
+            </p>
+          `;
+        }
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+      }
+    );
+  }
+
+  if (btnExplainDiagram) {
+    btnExplainDiagram.addEventListener('click', () => {
+      sendVisionRequest(
+        'Analyze this diagram, flowchart, or architecture chart in depth. Break down its components, data flow, arrows/relationships, labels, and core conceptual takeaways in structured markdown:',
+        '📊 Explain Diagram'
+      );
+    });
+  }
+
+  if (btnExplainFormula) {
+    btnExplainFormula.addEventListener('click', () => {
+      sendVisionRequest(
+        'Analyze this mathematical or scientific formula/equation. Transcribe it into standard LaTeX notation, explain what every variable and symbol represents, and explain the underlying theorem, concept, and real-world intuition:',
+        '🧮 Explain Formula & Math'
+      );
+    });
+  }
+
+  if (btnOcrText) {
+    btnOcrText.addEventListener('click', () => {
+      sendVisionRequest(
+        'Transcribe all text, numbers, equations, or code shown in this visual image verbatim. Then provide a concise explanation of what it represents:',
+        '📝 Transcribe Text & Code'
+      );
+    });
+  }
+
+  // 5. Native Fast AI Chat Logic
+  function handleChatSubmit() {
     const text = chatInput.value.trim();
-    if (text) {
-      chatInput.value = '';
+    if (!text) return;
+    chatInput.value = '';
+
+    if (currentCroppedBase64) {
+      sendVisionRequest(text, text);
+    } else {
       sendMessage(text);
     }
-  });
+  }
+
+  chatSendBtn.addEventListener('click', handleChatSubmit);
 
   chatInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      const text = chatInput.value.trim();
-      if (text) {
-        chatInput.value = '';
-        sendMessage(text);
-      }
+      handleChatSubmit();
     }
   });
 
@@ -515,12 +668,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (btnTldrPage) btnTldrPage.click();
       }, 350);
     }
+    if (message.type === 'SNIP_READY_FOR_CROP' && message.payload) {
+      handleNewSnipPayload(message.payload);
+    }
   });
 
   // 9. Listen for local storage updates in real time
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'local' && changes.currentContext) {
       updateContextDisplay(changes.currentContext.newValue?.text || '');
+    }
+    if (area === 'local' && changes.lastSnipPayload) {
+      if (changes.lastSnipPayload.newValue) {
+        handleNewSnipPayload(changes.lastSnipPayload.newValue);
+      }
     }
   });
 
