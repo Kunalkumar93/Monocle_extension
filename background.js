@@ -18,6 +18,12 @@ chrome.runtime.onInstalled.addListener(() => {
     title: '💬 OmniAI: Open in Side Panel',
     contexts: ['selection']
   });
+
+  chrome.contextMenus.create({
+    id: 'omni_summarize_page',
+    title: '📄 OmniAI: 30s TL;DR of Page',
+    contexts: ['page']
+  });
 });
 
 // Handle Context Menu clicks
@@ -32,6 +38,11 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     }).catch(() => {});
   } else if (info.menuItemId === 'omni_send_to_sidepanel') {
     await saveContextAndOpenPanel(tab.id, selectedText, tab.title, tab.url);
+  } else if (info.menuItemId === 'omni_summarize_page') {
+    await saveContextAndOpenPanel(tab.id, '', tab.title, tab.url);
+    setTimeout(() => {
+      chrome.runtime.sendMessage({ type: 'TRIGGER_PAGE_TLDR' }).catch(() => {});
+    }, 400);
   }
 });
 

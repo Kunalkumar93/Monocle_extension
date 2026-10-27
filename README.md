@@ -27,7 +27,14 @@ When reading complex articles or technical documentation, switching tabs to past
 * **Follow-Up Questions:** Type questions directly inside the in-page popover without opening any other windows.
 * **Complete CSS Isolation:** Built inside an isolated Shadow DOM (`ShadowRoot`), ensuring it never conflicts with or breaks host webpage styles.
 
-### 2. 💬 Docked Multi-Model Side Panel (Same Tab, Zero Switching)
+### 2. 📄 Full-Page Intelligence & 30-Second TL;DR (New!)
+* **Executive Summary on Demand:** Click **"⚡ 30s TL;DR"** to get a 2-sentence executive summary plus 3-4 high-impact key takeaways of any article or documentation.
+* **Structured Outlines:** Click **"📑 Outline"** to generate a clear hierarchical breakdown of the article's arguments.
+* **Chat with Entire Webpage:** Click **"💬 Chat Page"** to ground your conversation in the entire article. You can ask: *"What are the limitations mentioned in the conclusion?"* or *"Summarize the experimental findings"*.
+* **Automatic Reading Stats:** Instantly displays reading time and word count (e.g. `📖 ~4 min read (850 words)`).
+* **Right-Click Integration:** Right-click anywhere on any page $\rightarrow$ **"📄 OmniAI: 30s TL;DR of Page"**.
+
+### 3. 💬 Docked Multi-Model Side Panel (Same Tab, Zero Switching)
 A persistent native Chrome Side Panel docked on the right side of your window:
 * **🤖 ChatGPT (Web):** Use your regular free `chatgpt.com` account with full chat history.
 * **🧠 Claude (Web):** Use your regular free `claude.ai` account.

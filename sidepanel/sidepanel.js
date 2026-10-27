@@ -16,6 +16,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   const chipButtons = document.querySelectorAll('.chip-btn[data-prompt]');
   const btnPasteToWeb = document.getElementById('btn-paste-to-web');
 
+  // Page Intelligence Elements
+  const pageTitleDisplay = document.getElementById('page-title-display');
+  const pageReadTime = document.getElementById('page-read-time');
+  const btnTldrPage = document.getElementById('btn-tldr-page');
+  const btnDeepSummary = document.getElementById('btn-deep-summary');
+  const btnChatPageMode = document.getElementById('btn-chat-page-mode');
+  let currentPageData = null;
+
   // Chat elements
   const chatMessages = document.getElementById('chat-messages');
   const chatInput = document.getElementById('chat-input');
@@ -151,6 +159,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (!tab || !tab.id) return;
 
+      // 1. Sync highlighted selection
       chrome.tabs.sendMessage(tab.id, { type: 'GET_SELECTION' }, (res) => {
         if (!chrome.runtime.lastError && res && res.text) {
           updateContextDisplay(res.text);
@@ -169,15 +178,116 @@ document.addEventListener('DOMContentLoaded', async () => {
           }).catch(() => {});
         }
       });
+
+      // 2. Sync full page intelligence
+      chrome.tabs.sendMessage(tab.id, { type: 'GET_PAGE_CONTENT' }, (res) => {
+        if (!chrome.runtime.lastError && res && res.success && res.data) {
+          currentPageData = res.data;
+          updatePageIntelUI(res.data);
+          return;
+        }
+
+        // Fallback for page content extraction
+        if (tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('edge://')) {
+          chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: () => {
+              const article = document.querySelector('article') || document.querySelector('main') || document.body;
+              const text = (article.innerText || '').replace(/\s+/g, ' ').trim();
+              const words = text ? text.split(/\s+/).filter(Boolean) : [];
+              return {
+                title: document.title || 'Current Webpage',
+                url: window.location.href,
+                wordCount: words.length,
+                readingTime: Math.max(1, Math.ceil(words.length / 220)),
+                text: text.slice(0, 60000)
+              };
+            }
+          }).then((results) => {
+            if (results && results[0] && results[0].result) {
+              currentPageData = results[0].result;
+              updatePageIntelUI(currentPageData);
+            }
+          }).catch(() => {});
+        }
+      });
     } catch (e) {
       console.warn('Sync with active tab notice:', e);
     }
+  }
+
+  function updatePageIntelUI(data) {
+    if (!data) return;
+    const shortTitle = data.title.length > 25 ? data.title.slice(0, 24) + '...' : data.title;
+    pageTitleDisplay.textContent = `📄 ${shortTitle}`;
+    pageTitleDisplay.title = data.title;
+    pageReadTime.textContent = `📖 ~${data.readingTime} min (${data.wordCount} words)`;
+    pageReadTime.style.display = 'inline-block';
   }
 
   // Trigger immediate tab sync on sidepanel open and focus
   syncWithActiveTab();
   window.addEventListener('focus', syncWithActiveTab);
   chrome.tabs.onActivated.addListener(syncWithActiveTab);
+
+  // 30-Second Page TL;DR
+  btnTldrPage.addEventListener('click', async () => {
+    if (!currentPageData || !currentPageData.text) {
+      await syncWithActiveTab();
+    }
+    if (!currentPageData || !currentPageData.text) {
+      showToast('Could not extract page text from this tab.');
+      return;
+    }
+
+    const prompt = `Please provide a 30-Second Executive Summary of this article ("${currentPageData.title}").\n\nStructure your response as:\n### ⚡ 30-Second TL;DR\n2 to 3 concise, high-impact sentences capturing the core thesis.\n\n### 🎯 Key Takeaways\n• 3 to 4 crisp bullet points highlighting the most crucial conclusions.\n\nArticle Text:\n"""\n${currentPageData.text}\n"""`;
+
+    if (activeEngine === 'fast-ai') {
+      sendMessage(prompt, true, `⚡ Executive 30s TL;DR of: "${currentPageData.title}"`);
+    } else {
+      navigator.clipboard.writeText(prompt).then(() => {
+        showToast('30s TL;DR prompt copied! Press Ctrl+V in the chat.');
+      });
+    }
+  });
+
+  // Deep Outline & Key Points
+  btnDeepSummary.addEventListener('click', async () => {
+    if (!currentPageData || !currentPageData.text) {
+      await syncWithActiveTab();
+    }
+    if (!currentPageData || !currentPageData.text) {
+      showToast('Could not extract page text from this tab.');
+      return;
+    }
+
+    const prompt = `Please provide a structured, in-depth outline of this article ("${currentPageData.title}") with sections, key arguments, and takeaways:\n\nArticle Text:\n"""\n${currentPageData.text}\n"""`;
+
+    if (activeEngine === 'fast-ai') {
+      sendMessage(prompt, true, `📑 Outline & Key Points of: "${currentPageData.title}"`);
+    } else {
+      navigator.clipboard.writeText(prompt).then(() => {
+        showToast('Outline prompt copied! Press Ctrl+V in the chat.');
+      });
+    }
+  });
+
+  // Chat with Entire Webpage Mode
+  btnChatPageMode.addEventListener('click', async () => {
+    if (!currentPageData || !currentPageData.text) {
+      await syncWithActiveTab();
+    }
+    if (!currentPageData || !currentPageData.text) {
+      showToast('Could not extract page text from this tab.');
+      return;
+    }
+
+    currentContextText = currentPageData.text;
+    updateContextDisplay(`[Whole Webpage Context] ${currentPageData.title} (~${currentPageData.wordCount} words)`);
+    chatInput.placeholder = `Ask anything about this entire page...`;
+    chatInput.focus();
+    showToast('💬 Whole Page Chat mode activated!');
+  });
 
   btnDismissContext.addEventListener('click', () => {
     updateContextDisplay('');
@@ -249,11 +359,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     return msgEl;
   }
 
-  async function sendMessage(promptText) {
-    appendMessage('user', promptText);
+  async function sendMessage(promptText, isPageSummary = false, displaySnippet = null) {
+    appendMessage('user', displaySnippet || (isPageSummary ? '⚡ Please generate an Executive 30-Second TL;DR of this page.' : promptText));
 
     // Placeholder bot message
-    const botMsg = appendMessage('bot', '<span class="omni-spinner"></span>Thinking...', true);
+    const botMsg = appendMessage('bot', '<span class="omni-spinner"></span>Reading and analyzing...', true);
 
     try {
       chrome.runtime.sendMessage(
@@ -399,6 +509,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     if (message.type === 'SELECTION_CHANGED' && message.text) {
       updateContextDisplay(message.text);
+    }
+    if (message.type === 'TRIGGER_PAGE_TLDR') {
+      setTimeout(() => {
+        if (btnTldrPage) btnTldrPage.click();
+      }, 350);
     }
   });
 

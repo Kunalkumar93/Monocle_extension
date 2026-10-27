@@ -350,12 +350,49 @@
     }
   });
 
+  // Clean Page Content Extraction for Full Page TL;DR & Chat
+  function extractPageContent() {
+    const articleElem = document.querySelector('article') || document.querySelector('main') || document.querySelector('[role="main"]');
+    const container = articleElem ? articleElem.cloneNode(true) : document.body.cloneNode(true);
+
+    // Remove noise elements
+    const unwanted = container.querySelectorAll('nav, header, footer, aside, script, style, noscript, svg, iframe, form, button, [aria-hidden="true"]');
+    unwanted.forEach(el => el.remove());
+
+    // Clean text
+    let text = container.innerText || container.textContent || '';
+    text = text.replace(/\n\s*\n\s*\n/g, '\n\n').replace(/[ \t]+/g, ' ').trim();
+
+    // Cap text to ~60,000 characters for optimal response speed
+    if (text.length > 60000) {
+      text = text.slice(0, 60000) + '\n\n[... Remaining content truncated for performance ...]';
+    }
+
+    const words = text ? text.split(/\s+/).filter(Boolean) : [];
+    const wordCount = words.length;
+    const readingTime = Math.max(1, Math.ceil(wordCount / 220));
+
+    return {
+      title: document.title || document.querySelector('h1')?.innerText || 'Current Page',
+      url: window.location.href,
+      wordCount,
+      readingTime,
+      text
+    };
+  }
+
   // Listen to messages from background worker and side panel
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'GET_SELECTION') {
       const selection = window.getSelection();
       const text = selection ? selection.toString().trim() : currentSelectedText;
       sendResponse({ text: text || currentSelectedText });
+      return true;
+    }
+
+    if (message.type === 'GET_PAGE_CONTENT') {
+      const pageData = extractPageContent();
+      sendResponse({ success: true, data: pageData });
       return true;
     }
 
