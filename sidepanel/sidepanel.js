@@ -20,8 +20,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   const pageTitleDisplay = document.getElementById('page-title-display');
   const pageReadTime = document.getElementById('page-read-time');
   const btnTldrPage = document.getElementById('btn-tldr-page');
+  const btnTranslatePage = document.getElementById('btn-translate-page');
   const btnDeepSummary = document.getElementById('btn-deep-summary');
   const btnChatPageMode = document.getElementById('btn-chat-page-mode');
+  const btnChipTranslate = document.getElementById('btn-chip-translate');
   let currentPageData = null;
 
   // Chat elements
@@ -53,6 +55,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const inputCustomUrl = document.getElementById('input-custom-url');
   const selectDefaultEngine = document.getElementById('select-default-engine');
   const selectGeminiModel = document.getElementById('select-gemini-model');
+  const selectTargetLanguage = document.getElementById('select-target-language');
   const btnToggleKey = document.getElementById('btn-toggle-key-visibility');
   const btnTestKey = document.getElementById('btn-test-key');
   const geminiKeyStatus = document.getElementById('gemini-key-status');
@@ -88,11 +91,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     'defaultEngine',
     'lastEngine',
     'currentContext',
-    'lastSnipPayload'
+    'lastSnipPayload',
+    'targetLanguage'
   ]);
 
   if (storage.geminiApiKey) inputGeminiKey.value = storage.geminiApiKey;
   if (storage.geminiModel && selectGeminiModel) selectGeminiModel.value = storage.geminiModel;
+  if (storage.targetLanguage && selectTargetLanguage) selectTargetLanguage.value = storage.targetLanguage;
   if (storage.geminiWebUrl) APP_URLS.gemini = storage.geminiWebUrl;
   if (storage.customEndpoint) {
     inputCustomUrl.value = storage.customEndpoint;
@@ -270,6 +275,30 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
+  // Multilingual Page Summary & Key Takeaways
+  if (btnTranslatePage) {
+    btnTranslatePage.addEventListener('click', async () => {
+      if (!currentPageData || !currentPageData.text) {
+        await syncWithActiveTab();
+      }
+      if (!currentPageData || !currentPageData.text) {
+        showToast('Could not extract page text from this tab.');
+        return;
+      }
+
+      const targetLang = selectTargetLanguage ? selectTargetLanguage.value : 'English';
+      const prompt = `Please provide an Executive Summary and Key Takeaways of this article ("${currentPageData.title}") translated into ${targetLang}.\n\nStructure your response cleanly as:\n### 🌐 30-Second TL;DR (${targetLang})\n2 to 3 concise, high-impact sentences capturing the core thesis.\n\n### 🎯 Key Takeaways (${targetLang})\n• 3 to 4 crisp bullet points highlighting the conclusions.\n\n### 🔍 Key Terminology & Nuance Notes\n• 2 to 3 notable technical concepts or terms explained in ${targetLang}.\n\nArticle Text:\n"""\n${currentPageData.text}\n"""`;
+
+      if (activeEngine === 'fast-ai') {
+        sendMessage(prompt, true, `🌐 Executive Summary in ${targetLang} of: "${currentPageData.title}"`);
+      } else {
+        navigator.clipboard.writeText(prompt).then(() => {
+          showToast(`Page translation prompt copied! Press Ctrl+V in ${ENGINE_NAMES[activeEngine]}.`);
+        });
+      }
+    });
+  }
+
   // Deep Outline & Key Points
   btnDeepSummary.addEventListener('click', async () => {
     if (!currentPageData || !currentPageData.text) {
@@ -326,6 +355,25 @@ document.addEventListener('DOMContentLoaded', async () => {
       showToast('Copied! Press Ctrl+V in the chat box.');
     });
   });
+
+  // 1-Click Multilingual Translation Chip
+  if (btnChipTranslate) {
+    btnChipTranslate.addEventListener('click', () => {
+      if (!currentContextText) {
+        showToast('Please select text on the page first!');
+        return;
+      }
+      const targetLang = selectTargetLanguage ? selectTargetLanguage.value : 'English';
+      if (activeEngine === 'fast-ai') {
+        sendMessage('', false, `🌐 Translate to ${targetLang}`, false, null, true);
+      } else {
+        const prompt = `Please translate the following text into ${targetLang} with vocabulary notes:\n\n"${currentContextText}"`;
+        navigator.clipboard.writeText(prompt).then(() => {
+          showToast(`Translation prompt copied! Press Ctrl+V in ${ENGINE_NAMES[activeEngine]}.`);
+        });
+      }
+    });
+  }
 
   // Prompt Chips Click
   chipButtons.forEach((chip) => {
@@ -421,38 +469,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         <div><strong>${label}</strong></div>
       </div>
     `;
-    appendMessage('user', userHtml, true);
 
-    // Bot placeholder
-    const botMsg = appendMessage('bot', '<span class="omni-spinner"></span>Analyzing visual content with Gemini Vision...', true);
-
-    chrome.runtime.sendMessage(
-      {
-        type: 'FETCH_GEMINI_VISION',
-        prompt,
-        base64Image: imageToSend
-      },
-      (res) => {
-        if (chrome.runtime.lastError) {
-          botMsg.querySelector('.msg-content').innerHTML = `
-            <p style="color: #f87171;">⚠️ ${chrome.runtime.lastError.message}</p>
-          `;
-          chatMessages.scrollTop = chatMessages.scrollHeight;
-          return;
-        }
-        if (res && res.success) {
-          botMsg.querySelector('.msg-content').innerHTML = renderMarkdown(res.text);
-        } else {
-          botMsg.querySelector('.msg-content').innerHTML = `
-            <p style="color: #f87171;">⚠️ ${(res && res.error) || 'Failed to analyze image'}</p>
-            <p style="font-size: 11.5px; margin-top: 4px; color: #9ca3af;">
-              Ensure your free Google Gemini API key is configured in <strong>⚙️ Settings</strong>.
-            </p>
-          `;
-        }
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-      }
-    );
+    sendMessage(prompt, false, userHtml, true, imageToSend);
   }
 
   if (btnExplainDiagram) {
@@ -519,42 +537,62 @@ document.addEventListener('DOMContentLoaded', async () => {
     return msgEl;
   }
 
-  async function sendMessage(promptText, isPageSummary = false, displaySnippet = null) {
+  // Real-Time SSE Token Streaming Message Dispatcher
+  async function sendMessage(promptText, isPageSummary = false, displaySnippet = null, isVision = false, base64Image = null, isTranslation = false) {
     appendMessage('user', displaySnippet || (isPageSummary ? '⚡ Please generate an Executive 30-Second TL;DR of this page.' : promptText));
 
-    // Placeholder bot message
     const botMsg = appendMessage('bot', '<span class="omni-spinner"></span>Reading and analyzing...', true);
+    const botContent = botMsg.querySelector('.msg-content');
+
+    const targetLang = selectTargetLanguage ? selectTargetLanguage.value : 'English';
 
     try {
-      chrome.runtime.sendMessage(
-        {
-          type: 'FETCH_GEMINI_EXPLANATION',
-          prompt: promptText,
-          text: currentContextText
-        },
-        (res) => {
-          if (chrome.runtime.lastError) {
-            botMsg.querySelector('.msg-content').innerHTML = `
-              <p style="color: #f87171;">⚠️ ${chrome.runtime.lastError.message}</p>
-            `;
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-            return;
+      const port = chrome.runtime.connect({ name: 'monocle-stream' });
+      let accumulated = '';
+      let receivedFirstChunk = false;
+
+      port.onMessage.addListener((msg) => {
+        if (msg.type === 'CHUNK') {
+          if (!receivedFirstChunk) {
+            receivedFirstChunk = true;
+            botContent.innerHTML = '';
           }
-          if (res && res.success) {
-            botMsg.querySelector('.msg-content').innerHTML = renderMarkdown(res.text);
-          } else {
-            botMsg.querySelector('.msg-content').innerHTML = `
-              <p style="color: #f87171;">⚠️ ${(res && res.error) || 'Failed to fetch response'}</p>
-              <p style="font-size: 11.5px; margin-top: 4px; color: #9ca3af;">
-                Check your free API key in <strong>⚙️ Settings</strong>.
-              </p>
-            `;
-          }
+          accumulated += msg.text;
+          botContent.innerHTML = renderMarkdown(accumulated) + '<span class="omni-cursor"></span>';
           chatMessages.scrollTop = chatMessages.scrollHeight;
+        } else if (msg.type === 'DONE') {
+          botContent.innerHTML = renderMarkdown(accumulated);
+          chatMessages.scrollTop = chatMessages.scrollHeight;
+          try { port.disconnect(); } catch (e) {}
+        } else if (msg.type === 'ERROR') {
+          botContent.innerHTML = `
+            <p style="color: #f87171;">⚠️ ${msg.error || 'Failed to fetch response'}</p>
+            <p style="font-size: 11.5px; margin-top: 4px; color: #9ca3af;">
+              Check your free API key in <strong>⚙️ Settings</strong>.
+            </p>
+          `;
+          chatMessages.scrollTop = chatMessages.scrollHeight;
+          try { port.disconnect(); } catch (e) {}
         }
-      );
+      });
+
+      port.onDisconnect.addListener(() => {
+        if (!receivedFirstChunk && chrome.runtime.lastError) {
+          botContent.innerHTML = `<p style="color: #f87171;">⚠️ Connection interrupted: ${chrome.runtime.lastError.message}</p>`;
+        }
+      });
+
+      port.postMessage({
+        type: 'START_STREAM',
+        prompt: promptText,
+        text: currentContextText,
+        isVision,
+        base64Image,
+        isTranslation,
+        targetLanguage: targetLang
+      });
     } catch (e) {
-      botMsg.querySelector('.msg-content').innerHTML = `<p style="color: #f87171;">⚠️ Error: ${e.message}</p>`;
+      botContent.innerHTML = `<p style="color: #f87171;">⚠️ Error connecting stream: ${e.message}</p>`;
     }
   }
 
@@ -650,6 +688,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   btnSaveSettings.addEventListener('click', async () => {
     const geminiApiKey = inputGeminiKey.value.trim();
     const geminiModel = selectGeminiModel ? selectGeminiModel.value : 'auto';
+    const targetLanguage = selectTargetLanguage ? selectTargetLanguage.value : 'English';
     const customEndpoint = inputCustomUrl.value.trim();
     const defaultEngine = selectDefaultEngine.value;
 
@@ -660,6 +699,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     await chrome.storage.local.set({
       geminiApiKey,
       geminiModel,
+      targetLanguage,
       customEndpoint,
       defaultEngine
     });

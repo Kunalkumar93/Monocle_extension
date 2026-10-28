@@ -14,6 +14,12 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 
   chrome.contextMenus.create({
+    id: 'monocle_translate_selection',
+    title: '🌐 Monocle: Translate "%s"',
+    contexts: ['selection']
+  });
+
+  chrome.contextMenus.create({
     id: 'monocle_send_to_sidepanel',
     title: '💬 Monocle: Open in Side Panel',
     contexts: ['selection']
@@ -50,6 +56,11 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === 'monocle_explain_selection' || info.menuItemId === 'omni_explain_selection') {
     chrome.tabs.sendMessage(tab.id, {
       type: 'TRIGGER_QUICK_EXPLAIN',
+      text: selectedText
+    }).catch(() => {});
+  } else if (info.menuItemId === 'monocle_translate_selection') {
+    chrome.tabs.sendMessage(tab.id, {
+      type: 'TRIGGER_QUICK_TRANSLATE',
       text: selectedText
     }).catch(() => {});
   } else if (info.menuItemId === 'monocle_send_to_sidepanel' || info.menuItemId === 'omni_send_to_sidepanel') {
@@ -193,6 +204,316 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ status: 'ready' });
   }
 });
+
+// Multilingual Translation Prompt Formatter
+function buildTranslationPrompt(text, targetLang) {
+  const language = targetLang && targetLang !== 'auto' ? targetLang : 'English';
+  return `You are a professional multilingual translator and language reading companion.
+Translate the following excerpt into ${language} with high precision, natural fluency, and idiomatic nuance:
+
+Excerpt:
+"""
+${text}
+"""
+
+Format your response cleanly in structured markdown as follows:
+### 🌐 Translation (${language})
+[Provide the fluent, natural translation here]
+
+### 🔍 Key Vocabulary & Nuance Notes
+• **[Key Term 1 in original]** → **[Translation]**: [1-sentence contextual meaning, nuance, or technical definition]
+• **[Key Term 2 in original]** → **[Translation]**: [1-sentence contextual meaning, nuance, or technical definition]
+(List up to 3 notable keywords, idioms, or technical jargon from the excerpt. If the text is short or simple, summarize key message in 1 sentence)`;
+}
+
+// Long-lived Port Listener for Real-Time SSE Token Streaming
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name === 'monocle-stream') {
+    const abortController = new AbortController();
+
+    port.onDisconnect.addListener(() => {
+      abortController.abort();
+    });
+
+    port.onMessage.addListener(async (message) => {
+      if (message.type === 'START_STREAM') {
+        try {
+          await handleStreamingRequest(message, (chunk) => {
+            try {
+              port.postMessage({ type: 'CHUNK', text: chunk });
+            } catch (e) {}
+          }, abortController.signal);
+          try {
+            port.postMessage({ type: 'DONE' });
+          } catch (e) {}
+        } catch (err) {
+          if (!abortController.signal.aborted) {
+            try {
+              port.postMessage({ type: 'ERROR', error: err.message || 'Stream connection error' });
+            } catch (e) {}
+          }
+        }
+      }
+    });
+  }
+});
+
+// Central streaming dispatcher
+async function handleStreamingRequest(request, onChunk, signal) {
+  const { geminiApiKey, geminiModel, targetLanguage, customEndpoint, selectedEngine } = await chrome.storage.local.get([
+    'geminiApiKey',
+    'geminiModel',
+    'targetLanguage',
+    'customEndpoint',
+    'selectedEngine'
+  ]);
+
+  const activeTargetLang = request.targetLanguage || targetLanguage || 'English';
+
+  // 1. Vision Streaming
+  if (request.isVision && request.base64Image) {
+    if (!geminiApiKey || !geminiApiKey.trim()) {
+      throw new Error('Please enter your free Google Gemini API key in Settings to analyze diagrams and formulas.');
+    }
+    const cleanBase64 = request.base64Image.replace(/^data:image\/[a-z]+;base64,/, '');
+    const visionPayload = [
+      {
+        parts: [
+          {
+            inlineData: {
+              mimeType: 'image/png',
+              data: cleanBase64
+            }
+          },
+          {
+            text: request.prompt || 'Analyze this technical diagram, chart, or mathematical formula. Break down its components, flow, meaning, and key concepts in clear, structured markdown:'
+          }
+        ]
+      }
+    ];
+    return await streamGeminiContents(geminiApiKey.trim(), visionPayload, geminiModel, onChunk, signal);
+  }
+
+  // 2. Multilingual Translation or Text Prompt
+  let fullPrompt = '';
+  if (request.isTranslation) {
+    fullPrompt = buildTranslationPrompt(request.text, activeTargetLang);
+  } else if (request.prompt && request.text) {
+    if (request.prompt.includes(request.text)) {
+      fullPrompt = request.prompt;
+    } else {
+      fullPrompt = `${request.prompt}\n\n"${request.text}"`;
+    }
+  } else {
+    fullPrompt = request.prompt || request.text || '';
+  }
+
+  // If user provided Gemini API key
+  if (geminiApiKey && geminiApiKey.trim()) {
+    const textPayload = [
+      {
+        parts: [{ text: fullPrompt }]
+      }
+    ];
+    return await streamGeminiContents(geminiApiKey.trim(), textPayload, geminiModel, onChunk, signal);
+  }
+
+  // If user configured a custom endpoint and selected custom engine
+  if (customEndpoint && customEndpoint.trim() && selectedEngine === 'custom') {
+    const response = await fetch(customEndpoint.trim(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: fullPrompt, text: request.text || '' }),
+      signal
+    });
+    if (!response.ok) {
+      throw new Error(`Custom endpoint error: HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    const resultText = data.response || data.text || data.message || JSON.stringify(data);
+    onChunk(resultText);
+    return;
+  }
+
+  // Fallback preview when no API key is configured yet (stream simulated tokens)
+  await streamSimulatedFallback(request.text || '', request.isTranslation ? `Translation to ${activeTargetLang}` : request.prompt, onChunk, signal);
+}
+
+// Simulated fallback typing animation when user hasn't added an API key
+async function streamSimulatedFallback(text, prompt, onChunk, signal) {
+  const preview = generateQuickSmartAnalysis(text, prompt);
+  const words = preview.split(/(\s+)/);
+  for (const word of words) {
+    if (signal?.aborted) break;
+    onChunk(word);
+    await new Promise(r => setTimeout(r, 16));
+  }
+}
+
+// Resilient SSE Stream Engine for Gemini with dynamic fallback
+async function streamGeminiContents(apiKey, contentsPayload, preferredModel, onChunk, signal) {
+  const cleanKey = apiKey.trim();
+
+  async function attemptStream(apiVersion, modelName) {
+    const cleanName = modelName.replace(/^models\//, '');
+    const url = `https://generativelanguage.googleapis.com/${apiVersion}/models/${cleanName}:streamGenerateContent?alt=sse&key=${cleanKey}`;
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: contentsPayload,
+        generationConfig: {
+          temperature: 0.25,
+          maxOutputTokens: 1000
+        }
+      }),
+      signal
+    });
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => null);
+      throw new Error((errData && errData.error && errData.error.message) || `HTTP ${res.status}`);
+    }
+
+    if (!res.body) {
+      throw new Error('Response body stream is unavailable.');
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    let emittedAny = false;
+
+    try {
+      while (true) {
+        if (signal?.aborted) {
+          reader.cancel();
+          break;
+        }
+
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('data:')) {
+            const jsonStr = trimmed.slice(5).trim();
+            if (!jsonStr || jsonStr === '[DONE]') continue;
+            try {
+              const parsed = JSON.parse(jsonStr);
+              if (parsed.error) {
+                throw new Error(parsed.error.message || 'Stream candidate error');
+              }
+              const chunk = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
+              if (chunk) {
+                emittedAny = true;
+                onChunk(chunk);
+              }
+            } catch (err) {
+              if (err.message && !err.message.includes('JSON')) {
+                throw err;
+              }
+            }
+          }
+        }
+      }
+
+      if (buffer.trim().startsWith('data:')) {
+        const jsonStr = buffer.trim().slice(5).trim();
+        if (jsonStr && jsonStr !== '[DONE]') {
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const chunk = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (chunk) {
+              emittedAny = true;
+              onChunk(chunk);
+            }
+          } catch (e) {}
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    if (emittedAny) {
+      chrome.storage.local.set({
+        workingGeminiModel: cleanName,
+        workingGeminiVersion: apiVersion
+      });
+      return true;
+    }
+
+    throw new Error(`Empty response from ${cleanName}`);
+  }
+
+  // 1. Try preferred model if specified
+  if (preferredModel && preferredModel !== 'auto') {
+    for (const ver of ['v1beta', 'v1']) {
+      try {
+        await attemptStream(ver, preferredModel);
+        return;
+      } catch (e) {
+        if (signal?.aborted) throw e;
+        console.warn(`Preferred model ${preferredModel} on ${ver} failed:`, e.message);
+      }
+    }
+  }
+
+  // 2. Try cached working model
+  const { workingGeminiModel, workingGeminiVersion } = await chrome.storage.local.get([
+    'workingGeminiModel',
+    'workingGeminiVersion'
+  ]);
+
+  if (workingGeminiModel) {
+    try {
+      await attemptStream(workingGeminiVersion || 'v1beta', workingGeminiModel);
+      return;
+    } catch (e) {
+      if (signal?.aborted) throw e;
+      chrome.storage.local.remove(['workingGeminiModel']);
+    }
+  }
+
+  // 3. Fallback to candidate list with ListModels discovery
+  const testRes = await testGeminiKey(cleanKey).catch(() => null);
+  const modelsToTry = (testRes && testRes.models && testRes.models.length > 0)
+    ? testRes.models
+    : ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash-latest'];
+
+  function getModelScore(name) {
+    const lower = name.toLowerCase();
+    if (lower.includes('2.5-flash')) return 100;
+    if (lower.includes('2.0-flash') && !lower.includes('lite')) return 90;
+    if (lower.includes('2.0-flash-lite')) return 85;
+    if (lower.includes('flash-latest')) return 80;
+    if (lower.includes('1.5-flash')) return 75;
+    if (lower.includes('flash')) return 70;
+    if (lower.includes('pro')) return 60;
+    return 10;
+  }
+  modelsToTry.sort((a, b) => getModelScore(b) - getModelScore(a));
+
+  let lastError = null;
+  for (const m of modelsToTry) {
+    for (const ver of [testRes?.version || 'v1beta', 'v1']) {
+      try {
+        await attemptStream(ver, m);
+        return;
+      } catch (err) {
+        if (signal?.aborted) throw err;
+        lastError = err;
+      }
+    }
+  }
+
+  throw lastError || new Error('Failed to stream response with available models.');
+}
 
 // Vision Analysis using Gemini Multimodal
 async function handleGeminiVision(prompt, base64Image) {

@@ -431,6 +431,33 @@ body {
   background: rgba(16, 185, 129, 0.25);
 }
 
+.chip-translate-accent {
+  background: rgba(14, 165, 233, 0.15);
+  border-color: rgba(14, 165, 233, 0.4);
+  color: #7dd3fc;
+}
+.chip-translate-accent:hover {
+  background: rgba(14, 165, 233, 0.28);
+  border-color: #38bdf8;
+  color: #ffffff;
+}
+
+.omni-cursor {
+  display: inline-block;
+  width: 6px;
+  height: 14px;
+  background-color: #818cf8;
+  margin-left: 3px;
+  vertical-align: middle;
+  border-radius: 1px;
+  animation: omni-blink 0.8s infinite;
+}
+
+@keyframes omni-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
 /* Main Content Views */
 .content-view {
   flex: 1;

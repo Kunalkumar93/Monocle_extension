@@ -97,6 +97,56 @@
   box-shadow: 0 0 12px rgba(99, 102, 241, 0.5);
 }
 
+.omni-btn-translate {
+  background: linear-gradient(135deg, #0284c7, #6366f1);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  color: #ffffff;
+}
+
+.omni-btn-translate:hover {
+  background: linear-gradient(135deg, #0369a1, #4f46e5);
+  box-shadow: 0 0 12px rgba(14, 165, 233, 0.5);
+}
+
+.omni-lang-badge {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #c7d2fe;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  outline: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.omni-lang-badge:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: #818cf8;
+}
+
+.omni-lang-badge option {
+  background: #131620;
+  color: #f3f4f6;
+}
+
+.omni-cursor {
+  display: inline-block;
+  width: 6px;
+  height: 14px;
+  background-color: #818cf8;
+  margin-left: 3px;
+  vertical-align: middle;
+  border-radius: 1px;
+  animation: omni-blink 0.8s infinite;
+}
+
+@keyframes omni-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
 .omni-btn-icon {
   font-size: 13px;
   line-height: 1;

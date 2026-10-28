@@ -11,6 +11,21 @@
   let popoverElement = null;
   let hostElement = null;
   let selectionDebounceTimer = null;
+  let currentTargetLanguage = 'English';
+  let activeStreamPort = null;
+  let currentIsTranslation = false;
+  let currentPromptPrefix = '';
+
+  // Load user language preference
+  try {
+    if (chrome?.storage?.local) {
+      chrome.storage.local.get(['targetLanguage'], (data) => {
+        if (data && data.targetLanguage) {
+          currentTargetLanguage = data.targetLanguage;
+        }
+      });
+    }
+  } catch (e) {}
 
   // Safe Extension Context Checker (detects if extension was reloaded in chrome://extensions)
   function isContextValid() {
@@ -83,6 +98,11 @@
       .omni-btn { display: inline-flex; align-items: center; gap: 5px; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.1); color: #e5e7eb; padding: 5px 10px; border-radius: 9999px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s ease; white-space: nowrap; }
       .omni-btn:hover { background: rgba(99, 102, 241, 0.25); border-color: rgba(99, 102, 241, 0.5); color: #ffffff; }
       .omni-btn-primary { background: linear-gradient(135deg, #4f46e5, #7c3aed); border: 1px solid rgba(168, 85, 247, 0.4); color: #ffffff; }
+      .omni-btn-translate { background: linear-gradient(135deg, #0ea5e9, #6366f1); border: 1px solid rgba(56, 189, 248, 0.4); color: #ffffff; }
+      .omni-lang-badge { background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.18); color: #c7d2fe; font-size: 11px; font-weight: 600; padding: 2px 6px; border-radius: 4px; outline: none; cursor: pointer; }
+      .omni-lang-badge option { background: #131620; color: #f3f4f6; }
+      .omni-cursor { display: inline-block; width: 6px; height: 13px; background: #818cf8; margin-left: 2px; vertical-align: middle; border-radius: 1px; animation: omni-blink 0.8s infinite; }
+      @keyframes omni-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
       .omni-popover { position: absolute; width: 380px; max-width: calc(100vw - 30px); background: rgba(18, 20, 29, 0.96); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 12px; box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(99, 102, 241, 0.25); z-index: 2147483647; opacity: 0; transform: translateY(6px) scale(0.97); pointer-events: none; transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1); display: flex; flex-direction: column; overflow: hidden; color: #f3f4f6; }
       .omni-popover.visible { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
       .omni-popover-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: rgba(255, 255, 255, 0.04); border-bottom: 1px solid rgba(255, 255, 255, 0.08); font-size: 12.5px; font-weight: 600; color: #a5b4fc; }
@@ -127,6 +147,9 @@
       <button class="omni-btn omni-btn-primary" id="omni-quick-explain-btn" title="Get fast explanation">
         <span class="omni-btn-icon">⚡</span> Explain
       </button>
+      <button class="omni-btn omni-btn-translate" id="omni-translate-btn" title="Translate & explain vocabulary">
+        <span class="omni-btn-icon">🌐</span> Translate
+      </button>
       <button class="omni-btn" id="omni-open-panel-btn" title="Open in docked Side Panel">
         <span class="omni-btn-icon">💬</span> Side Panel
       </button>
@@ -141,11 +164,25 @@
     popoverElement.className = 'omni-popover';
     popoverElement.innerHTML = `
       <div class="omni-popover-header">
-        <div class="omni-popover-header-left">
+        <div class="omni-popover-header-left" style="display: flex; align-items: center; gap: 6px;">
           <span style="font-size: 15px;">🧐</span>
-          <span>Monocle Quick Insight</span>
+          <span id="omni-popover-title">Monocle Quick Insight</span>
         </div>
         <div class="omni-popover-actions">
+          <select class="omni-lang-badge" id="omni-popover-lang-select" title="Target Language">
+            <option value="English">EN</option>
+            <option value="Spanish">ES</option>
+            <option value="French">FR</option>
+            <option value="German">DE</option>
+            <option value="Chinese (Simplified)">ZH</option>
+            <option value="Japanese">JA</option>
+            <option value="Korean">KO</option>
+            <option value="Hindi">HI</option>
+            <option value="Portuguese">PT</option>
+            <option value="Italian">IT</option>
+            <option value="Russian">RU</option>
+            <option value="Arabic">AR</option>
+          </select>
           <button class="omni-icon-btn" id="omni-popover-copy-btn" title="Copy answer">📋</button>
           <button class="omni-icon-btn" id="omni-popover-expand-btn" title="Expand into Side Panel">↗</button>
           <button class="omni-icon-btn" id="omni-popover-close-btn" title="Close (Esc)">✕</button>
@@ -171,6 +208,12 @@
     shadowRoot.getElementById('omni-quick-explain-btn').addEventListener('click', (e) => {
       e.stopPropagation();
       openPopover('Explain this simply and concisely:');
+    });
+
+    // Pill Translate Button
+    shadowRoot.getElementById('omni-translate-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      openPopover(null, true);
     });
 
     // Pill Summarize Button
@@ -201,6 +244,24 @@
       });
     });
 
+    // Popover Language Select Change
+    const langSelect = shadowRoot.getElementById('omni-popover-lang-select');
+    if (langSelect) {
+      if (currentTargetLanguage) langSelect.value = currentTargetLanguage;
+      langSelect.addEventListener('change', (e) => {
+        e.stopPropagation();
+        currentTargetLanguage = langSelect.value;
+        try {
+          if (chrome?.storage?.local) {
+            chrome.storage.local.set({ targetLanguage: currentTargetLanguage });
+          }
+        } catch (err) {}
+        if (currentSelectedText) {
+          executeStreamingAiQuery(currentPromptPrefix, currentIsTranslation);
+        }
+      });
+    }
+
     // Popover Expand into Side Panel
     shadowRoot.getElementById('omni-popover-expand-btn').addEventListener('click', (e) => {
       e.stopPropagation();
@@ -216,7 +277,7 @@
       const q = followupInput.value.trim();
       if (!q) return;
       followupInput.value = '';
-      executeAiQuery(`${q} regarding this text:`);
+      executeStreamingAiQuery(`${q} regarding this text:`, false);
     };
 
     followupSendBtn.addEventListener('click', handleFollowup);
@@ -226,10 +287,23 @@
     });
   }
 
-  // Open Popover and query AI
-  function openPopover(promptPrefix) {
+  // Open Popover and query AI (with real-time streaming)
+  function openPopover(promptPrefix, isTranslation = false) {
     if (!currentSelectedText) return;
     hidePill();
+
+    currentPromptPrefix = promptPrefix || '';
+    currentIsTranslation = isTranslation;
+
+    const titleEl = shadowRoot.getElementById('omni-popover-title');
+    if (titleEl) {
+      titleEl.textContent = isTranslation ? '🌐 Monocle Translation' : '🧐 Monocle Quick Insight';
+    }
+
+    const langSelect = shadowRoot.getElementById('omni-popover-lang-select');
+    if (langSelect && currentTargetLanguage) {
+      langSelect.value = currentTargetLanguage;
+    }
 
     // Position popover near selection
     const selection = window.getSelection();
@@ -248,32 +322,77 @@
     }
 
     popoverElement.classList.add('visible');
-    executeAiQuery(promptPrefix);
+    executeStreamingAiQuery(promptPrefix, isTranslation);
   }
 
-  // Execute AI Query via Background Worker
-  function executeAiQuery(promptPrefix) {
+  // Execute Streaming AI Query via Long-Lived Background Port
+  function executeStreamingAiQuery(promptPrefix, isTranslation = false) {
     const contentEl = shadowRoot.getElementById('omni-popover-content');
-    contentEl.innerHTML = `<p><span class="omni-spinner"></span>Thinking...</p>`;
+    contentEl.innerHTML = `<p><span class="omni-spinner"></span>${isTranslation ? `Translating to ${currentTargetLanguage}...` : 'Analyzing selected text...'}</p>`;
 
-    const sent = safeSendMessage(
-      {
-        type: 'FETCH_GEMINI_EXPLANATION',
-        prompt: promptPrefix,
-        text: currentSelectedText
-      },
-      (response) => {
-        if (response && response.success) {
-          contentEl.innerHTML = renderMarkdown(response.text);
-        } else {
-          contentEl.innerHTML = `<p style="color: #f87171;">⚠️ ${(response && response.error) || 'Failed to get answer'}</p>`;
-        }
-      }
-    );
-
-    if (!sent) {
-      contentEl.innerHTML = `<p style="color: #f87171;">⚠️ Extension was reloaded. Please refresh this page (F5).</p>`;
+    if (activeStreamPort) {
+      try { activeStreamPort.disconnect(); } catch (e) {}
+      activeStreamPort = null;
     }
+
+    let port;
+    try {
+      port = chrome.runtime.connect({ name: 'monocle-stream' });
+      activeStreamPort = port;
+    } catch (e) {
+      // Fallback if port creation failed
+      safeSendMessage(
+        {
+          type: 'FETCH_GEMINI_EXPLANATION',
+          prompt: isTranslation ? `Translate into ${currentTargetLanguage}` : promptPrefix,
+          text: currentSelectedText
+        },
+        (response) => {
+          if (response && response.success) {
+            contentEl.innerHTML = renderMarkdown(response.text);
+          } else {
+            contentEl.innerHTML = `<p style="color: #f87171;">⚠️ ${(response && response.error) || 'Failed to get answer'}</p>`;
+          }
+        }
+      );
+      return;
+    }
+
+    let accumulatedText = '';
+    let receivedFirstChunk = false;
+
+    port.onMessage.addListener((msg) => {
+      if (msg.type === 'CHUNK') {
+        if (!receivedFirstChunk) {
+          receivedFirstChunk = true;
+          contentEl.innerHTML = '';
+        }
+        accumulatedText += msg.text;
+        contentEl.innerHTML = renderMarkdown(accumulatedText) + '<span class="omni-cursor"></span>';
+        contentEl.scrollTop = contentEl.scrollHeight;
+      } else if (msg.type === 'DONE') {
+        contentEl.innerHTML = renderMarkdown(accumulatedText);
+        contentEl.scrollTop = contentEl.scrollHeight;
+        try { port.disconnect(); } catch (e) {}
+        activeStreamPort = null;
+      } else if (msg.type === 'ERROR') {
+        contentEl.innerHTML = `<p style="color: #f87171;">⚠️ ${msg.error || 'Failed to stream response'}</p>`;
+        try { port.disconnect(); } catch (e) {}
+        activeStreamPort = null;
+      }
+    });
+
+    port.onDisconnect.addListener(() => {
+      activeStreamPort = null;
+    });
+
+    port.postMessage({
+      type: 'START_STREAM',
+      prompt: promptPrefix,
+      text: currentSelectedText,
+      isTranslation: isTranslation,
+      targetLanguage: currentTargetLanguage
+    });
   }
 
   // Simple Markdown Renderer
@@ -319,6 +438,10 @@
   }
 
   function hidePopover() {
+    if (activeStreamPort) {
+      try { activeStreamPort.disconnect(); } catch (e) {}
+      activeStreamPort = null;
+    }
     if (popoverElement) popoverElement.classList.remove('visible');
   }
 
@@ -610,6 +733,13 @@
           currentSelectedText = message.text || window.getSelection()?.toString() || '';
           if (currentSelectedText) {
             openPopover('Explain this clearly and concisely:');
+          }
+        }
+
+        if (message.type === 'TRIGGER_QUICK_TRANSLATE') {
+          currentSelectedText = message.text || window.getSelection()?.toString() || '';
+          if (currentSelectedText) {
+            openPopover(null, true);
           }
         }
       });

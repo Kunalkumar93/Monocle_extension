@@ -20,49 +20,63 @@ When reading complex articles or technical documentation, switching tabs to past
 
 ## ✨ Features
 
-### 1. ⚡ Instant In-Page Action Pill & Popover Card
-* **Non-Intrusive:** Select text on any article to display a sleek floating pill.
+### 1. ⚡ Real-Time SSE Token Streaming (Zero Perceived Latency)
+* **Instant Typing Feedback:** Answers stream chunk-by-chunk via Server-Sent Events (SSE) with an animated cursor, eliminating waiting pauses.
+* **Sub-Second TTFT:** Time-To-First-Token under ~200ms using Google's newest Gemini 2.5 / 2.0 Flash models.
+* **Streamed Everywhere:** Works in both the in-page popover card and docked side panel (including Vision snip explanations).
+
+### 2. 🌐 Multilingual Live Translation & Dual-Language Reading
+* **1-Click Translation Pill:** Highlight any phrase or paragraph $\rightarrow$ click **"🌐 Translate"** on the floating pill or in the side panel.
+* **Intelligent Dual-Language Breakdown:** Provides fluent translation plus a **"🔍 Key Vocabulary & Nuance Notes"** breakdown of technical terms and idioms.
+* **On-The-Fly Language Switcher:** Instant language dropdown badge directly in the popover header (`EN`, `ES`, `FR`, `DE`, `ZH`, `JA`, `KO`, `HI`, `PT`, `IT`, `RU`, `AR`).
+* **Whole-Page Translation Mode:** Click **"🌐 Translate Page"** in the Page Intelligence Bar to get executive takeaways in your preferred language.
+* **Persistent Preferences:** Choose your target reading language in **⚙️ Settings** (supports 16+ global languages).
+
+### 3. ⚡ Instant In-Page Action Pill & Popover Card
+* **Non-Intrusive:** Select text on any article to display a sleek floating pill with **Explain**, **Translate**, **Side Panel**, and **Summary**.
 * **Instant Explanations:** Click **"⚡ Explain"** for a quick in-page popover card that breaks down difficult terms into plain English.
 * **3-Bullet Summaries:** Click **"📋 Summary"** to distill long paragraphs into 3 bullet points.
 * **Follow-Up Questions:** Type questions directly inside the in-page popover without opening any other windows.
 * **Complete CSS Isolation:** Built inside an isolated Shadow DOM (`ShadowRoot`), ensuring it never conflicts with or breaks host webpage styles.
 
-### 2. 📄 Full-Page Intelligence & 30-Second TL;DR
+### 4. 📄 Full-Page Intelligence & 30-Second TL;DR
 * **Executive Summary on Demand:** Click **"⚡ 30s TL;DR"** to get a 2-sentence executive summary plus 3-4 high-impact key takeaways of any article or documentation.
+* **Multilingual Page TL;DR:** Click **"🌐 Translate Page"** to translate the executive breakdown into your chosen language.
 * **Structured Outlines:** Click **"📑 Outline"** to generate a clear hierarchical breakdown of the article's arguments.
-* **Chat with Entire Webpage:** Click **"💬 Chat Page"** to ground your conversation in the entire article. You can ask: *"What are the limitations mentioned in the conclusion?"* or *"Summarize the experimental findings"*.
+* **Chat with Entire Webpage:** Click **"💬 Chat Page"** to ground your conversation in the entire article.
 * **Automatic Reading Stats:** Instantly displays reading time and word count (e.g. `📖 ~4 min read (850 words)`).
-* **Right-Click Integration:** Right-click anywhere on any page $\rightarrow$ **"📄 Monocle: 30s TL;DR of Page"**.
+* **Right-Click Integration:** Right-click anywhere on any page $\rightarrow$ **"📄 Monocle: 30s TL;DR of Page"** or **"🌐 Monocle: Translate Selection"**.
 
-### 3. 📸 Diagram & Formula Snip Tool (Multimodal Vision)
+### 5. 📸 Diagram & Formula Snip Tool (Multimodal Vision)
 * **Visual Snip Overlay:** Press **`Alt + S`** or click **"📸 Snip"** in the side panel to activate a precision crosshair selection overlay directly on the webpage.
 * **Instant Multimodal AI Analysis:** Snip any flowchart, architecture diagram, or math equation $\rightarrow$ Monocle automatically crops and renders it into the side panel.
 * **Specialized Vision Action Chips:**
   * `📊 Explain Diagram`: Deconstructs components, directional arrows, state flow, and core architecture.
   * `🧮 Explain Formula`: Transcribes mathematical formulas to LaTeX and explains what every variable and symbol represents.
   * `📝 Transcribe Text/Code`: Verbatim optical character recognition (OCR) of text, tables, or code embedded inside images.
-* **Ask Custom Questions:** Type any question about the snipped diagram directly into the chat (e.g., *"What is the purpose of the feedback loop?"*).
-* **Powered by Gemini Flash Vision:** 100% free multimodal vision using Google's newest Gemini 2.0/2.5 Flash models.
+* **Ask Custom Questions:** Type any question about the snipped diagram directly into the chat.
+* **Powered by Gemini Flash Vision:** 100% free multimodal vision streaming with Google's newest Gemini 2.0/2.5 Flash models.
 
-### 4. 💬 Docked Multi-Model Side Panel (Same Tab, Zero Switching)
+### 6. 💬 Docked Multi-Model Side Panel (Same Tab, Zero Switching)
 A persistent native Chrome Side Panel docked on the right side of your window:
+* **⚡ Fast Free AI (Native):** Clean, lightning-fast native chat UI powered by Google's free Gemini API or local Ollama with live token streaming.
 * **🤖 ChatGPT (Web):** Use your regular free `chatgpt.com` account with full chat history.
 * **🧠 Claude (Web):** Use your regular free `claude.ai` account.
 * **💎 Google Gemini (Web):** Direct access to `gemini.google.com/app`.
 * **🔍 Perplexity (Web):** Direct web search and source-grounded answers via `perplexity.ai`.
-* **⚡ Fast Free AI (Native):** Clean, lightning-fast native chat UI powered by Google's free Gemini API or local Ollama.
 * **🌐 Custom AI App:** Connect your own localhost (`http://localhost:3000`) or custom-hosted AI endpoints.
 
-### 5. 📌 Real-Time Live Context Sync ("The Magic Bar")
+### 7. 📌 Real-Time Live Context Sync ("The Magic Bar")
 * As you read and highlight sentences on the page, the side panel **automatically captures the text in real-time**.
 * **1-Click Prompt Chips:**
   * `💡 Explain Simply`
+  * `🌐 Translate`
   * `📋 Summarize`
   * `🎨 Analogy`
   * `⚖️ Critique / Counter-arguments`
   * `📋 Copy Context`
 
-### 6. 🔑 Resilient Free Gemini AI with Live Model Auto-Discovery
+### 8. 🔑 Resilient Free Gemini AI with Live Model Auto-Discovery
 * Supports **Google Gemini 2.0 Flash / 2.5 Flash** via Google AI Studio's 100% free tier (up to 1,500 requests/day at zero cost, no credit card required).
 * **Self-Healing Auto-Discovery:** Monocle queries Google's live `ModelService.ListModels` to inspect your key's authorized models dynamically and automatically picks the best available free generation model.
 * **`🔍 Test` Connection Button:** Easily verify your key in Settings and see all available models in real time.

@@ -56,6 +56,9 @@
         <button class="btn-action-glow" id="btn-tldr-page" title="30-Second Executive TL;DR of entire article">
           ⚡ 30s TL;DR
         </button>
+        <button class="btn-action-ghost" id="btn-translate-page" title="Translate page key takeaways to target language">
+          🌐 Translate Page
+        </button>
         <button class="btn-action-ghost" id="btn-deep-summary" title="Structured outline & key takeaways">
           📑 Outline
         </button>
@@ -77,6 +80,7 @@
       <div class="context-snippet" id="context-snippet">No text selected yet. Highlight any text in your article!</div>
       <div class="quick-prompts">
         <button class="chip-btn" data-prompt="Explain this clearly and simply:">💡 Explain</button>
+        <button class="chip-btn chip-translate-accent" id="btn-chip-translate" title="Translate selected text">🌐 Translate</button>
         <button class="chip-btn" data-prompt="Summarize this into 3 concise bullet points:">📋 Summarize</button>
         <button class="chip-btn" data-prompt="Give me a simple real-world analogy for this:">🎨 Analogy</button>
         <button class="chip-btn" data-prompt="What are the counterarguments or criticisms of this?">⚖️ Critique</button>
@@ -177,6 +181,29 @@
             <label class="setting-title">Custom AI App / Localhost URL</label>
             <p class="setting-desc">Connect your own local or hosted web application (e.g. <code>http://localhost:3000</code> or your custom AI deployment).</p>
             <input type="text" id="input-custom-url" placeholder="http://localhost:3000" />
+          </div>
+
+          <div class="setting-group">
+            <label class="setting-title">Target Translation & Reading Language</label>
+            <p class="setting-desc">Preferred language for one-click translations, dual-language vocabulary notes, and multilingual summaries.</p>
+            <select id="select-target-language" class="custom-select">
+              <option value="English">English</option>
+              <option value="Spanish">Spanish (Español)</option>
+              <option value="French">French (Français)</option>
+              <option value="German">German (Deutsch)</option>
+              <option value="Chinese (Simplified)">Chinese (中文 简体)</option>
+              <option value="Japanese">Japanese (日本語)</option>
+              <option value="Korean">Korean (한국어)</option>
+              <option value="Hindi">Hindi (हिन्दी)</option>
+              <option value="Portuguese">Portuguese (Português)</option>
+              <option value="Italian">Italian (Italiano)</option>
+              <option value="Russian">Russian (Русский)</option>
+              <option value="Arabic">Arabic (العربية)</option>
+              <option value="Dutch">Dutch (Nederlands)</option>
+              <option value="Polish">Polish (Polski)</option>
+              <option value="Turkish">Turkish (Türkçe)</option>
+              <option value="Vietnamese">Vietnamese (Tiếng Việt)</option>
+            </select>
           </div>
 
           <div class="setting-group">
