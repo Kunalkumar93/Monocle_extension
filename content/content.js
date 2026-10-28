@@ -1,7 +1,8 @@
-// OmniAI In-Page Content Script
+// Monocle In-Page Content Script
 (function () {
   // Prevent duplicate injection
-  if (window.__omniAiInitialized) return;
+  if (window.__monocleInitialized || window.__omniAiInitialized) return;
+  window.__monocleInitialized = true;
   window.__omniAiInitialized = true;
 
   let currentSelectedText = '';
@@ -51,10 +52,10 @@
 
   // Initialize Isolated Shadow DOM
   function initHost() {
-    hostElement = document.getElementById('omni-ai-companion-root');
+    hostElement = document.getElementById('monocle-companion-root') || document.getElementById('omni-ai-companion-root');
     if (!hostElement) {
       hostElement = document.createElement('div');
-      hostElement.id = 'omni-ai-companion-root';
+      hostElement.id = 'monocle-companion-root';
       document.documentElement.appendChild(hostElement);
     }
     if (!hostElement.shadowRoot) {
@@ -119,9 +120,9 @@
     pillElement = document.createElement('div');
     pillElement.className = 'omni-floating-pill';
     pillElement.innerHTML = `
-      <div class="omni-pill-brand" title="OmniAI Companion">
-        <div class="omni-pill-icon">✨</div>
-        <span class="omni-pill-title">OmniAI</span>
+      <div class="omni-pill-brand" title="Monocle Companion">
+        <div class="omni-pill-icon">🧐</div>
+        <span class="omni-pill-title">Monocle</span>
       </div>
       <button class="omni-btn omni-btn-primary" id="omni-quick-explain-btn" title="Get fast explanation">
         <span class="omni-btn-icon">⚡</span> Explain
@@ -141,8 +142,8 @@
     popoverElement.innerHTML = `
       <div class="omni-popover-header">
         <div class="omni-popover-header-left">
-          <span style="font-size: 15px;">✨</span>
-          <span>OmniAI Quick Insight</span>
+          <span style="font-size: 15px;">🧐</span>
+          <span>Monocle Quick Insight</span>
         </div>
         <div class="omni-popover-actions">
           <button class="omni-icon-btn" id="omni-popover-copy-btn" title="Copy answer">📋</button>
@@ -415,7 +416,7 @@
 
   // Close when clicking outside or pressing Escape
   document.addEventListener('mousedown', (e) => {
-    const host = document.getElementById('omni-ai-companion-root');
+    const host = document.getElementById('monocle-companion-root') || document.getElementById('omni-ai-companion-root');
     if (host && !host.contains(e.target)) {
       hidePill();
     }

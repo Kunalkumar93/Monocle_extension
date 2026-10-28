@@ -1,4 +1,4 @@
-// OmniAI Background Service Worker (Manifest V3)
+// Monocle Background Service Worker (Manifest V3)
 
 // Enable opening side panel on extension icon click
 chrome.sidePanel
@@ -8,26 +8,26 @@ chrome.sidePanel
 // Context Menu Setup
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
-    id: 'omni_explain_selection',
-    title: '⚡ OmniAI: Quick Explain "%s"',
+    id: 'monocle_explain_selection',
+    title: '⚡ Monocle: Quick Explain "%s"',
     contexts: ['selection']
   });
 
   chrome.contextMenus.create({
-    id: 'omni_send_to_sidepanel',
-    title: '💬 OmniAI: Open in Side Panel',
+    id: 'monocle_send_to_sidepanel',
+    title: '💬 Monocle: Open in Side Panel',
     contexts: ['selection']
   });
 
   chrome.contextMenus.create({
-    id: 'omni_summarize_page',
-    title: '📄 OmniAI: 30s TL;DR of Page',
+    id: 'monocle_summarize_page',
+    title: '📄 Monocle: 30s TL;DR of Page',
     contexts: ['page']
   });
 
   chrome.contextMenus.create({
-    id: 'omni_snip_diagram',
-    title: '📸 OmniAI: Snip Diagram / Formula (Alt+S)',
+    id: 'monocle_snip_diagram',
+    title: '📸 Monocle: Snip Diagram / Formula (Alt+S)',
     contexts: ['page', 'image']
   });
 });
@@ -47,19 +47,19 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (!tab || !tab.id) return;
   const selectedText = info.selectionText || '';
 
-  if (info.menuItemId === 'omni_explain_selection') {
+  if (info.menuItemId === 'monocle_explain_selection' || info.menuItemId === 'omni_explain_selection') {
     chrome.tabs.sendMessage(tab.id, {
       type: 'TRIGGER_QUICK_EXPLAIN',
       text: selectedText
     }).catch(() => {});
-  } else if (info.menuItemId === 'omni_send_to_sidepanel') {
+  } else if (info.menuItemId === 'monocle_send_to_sidepanel' || info.menuItemId === 'omni_send_to_sidepanel') {
     await saveContextAndOpenPanel(tab.id, selectedText, tab.title, tab.url);
-  } else if (info.menuItemId === 'omni_summarize_page') {
+  } else if (info.menuItemId === 'monocle_summarize_page' || info.menuItemId === 'omni_summarize_page') {
     await saveContextAndOpenPanel(tab.id, '', tab.title, tab.url);
     setTimeout(() => {
       safeBroadcast({ type: 'TRIGGER_PAGE_TLDR' });
     }, 400);
-  } else if (info.menuItemId === 'omni_snip_diagram') {
+  } else if (info.menuItemId === 'monocle_snip_diagram' || info.menuItemId === 'omni_snip_diagram') {
     chrome.tabs.sendMessage(tab.id, { type: 'START_SNIP' }).catch(() => {});
   }
 });

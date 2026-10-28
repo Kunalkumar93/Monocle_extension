@@ -1,4 +1,4 @@
-// OmniAI Side Panel Core Controller
+// Monocle Side Panel Core Controller
 document.addEventListener('DOMContentLoaded', async () => {
   // Elements
   const engineTabs = document.querySelectorAll('.tab-btn');

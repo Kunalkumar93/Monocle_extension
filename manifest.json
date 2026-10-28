@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "OmniAI - In-Tab AI Companion & Side Panel",
+  "name": "Monocle - In-Tab Reading Companion & Side Panel",
   "version": "1.0.0",
-  "description": "Read any article without leaving the tab. Instant in-page AI explanations + docked side-panel with ChatGPT, Claude, Gemini, Perplexity, & Custom AI apps.",
+  "description": "Read any article without leaving the tab. Instant in-page explanations + docked side-panel with ChatGPT, Claude, Gemini, Perplexity, & Custom apps.",
   "permissions": [
     "sidePanel",
     "storage",
@@ -47,7 +47,7 @@
     }
   ],
   "action": {
-    "default_title": "OmniAI Companion",
+    "default_title": "Monocle Companion",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png",
@@ -66,7 +66,7 @@
       "suggested_key": {
         "default": "Alt+A"
       },
-      "description": "Open OmniAI Side Panel"
+      "description": "Open Monocle Side Panel"
     },
     "snip_diagram": {
       "suggested_key": {

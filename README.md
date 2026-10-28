@@ -1,16 +1,16 @@
-# OmniAI ✨ — In-Tab AI Reading Companion & Multi-Model Side Panel
+# Monocle 🧐 — In-Tab Reading Companion & Multi-Model Side Panel
 
 > **Read any article, technical paper, or documentation on any browser without ever switching tabs, copying text back-and-forth, or taking screenshots.**
 
-OmniAI is an open-source **Manifest V3 Chrome & Chromium extension** that brings your favorite AI models directly into your current reading tab via an **in-page floating action card** and a **persistent multi-model side panel**.
+Monocle is an open-source **Manifest V3 Chrome & Chromium extension** that brings your favorite research and AI tools directly into your current reading tab via an **in-page floating action card** and a **persistent multi-model side panel**.
 
 ---
 
-## 💡 Why OmniAI?
+## 💡 Why Monocle?
 
 When reading complex articles or technical documentation, switching tabs to paste context into ChatGPT or Claude breaks your reading flow. 
 
-**OmniAI solves this seamlessly:**
+**Monocle solves this seamlessly:**
 * **Highlight any text** $\rightarrow$ A sleek floating action pill appears right next to your cursor.
 * **Instant In-Page Card** $\rightarrow$ Get an immediate explanation or summary right on the webpage without losing your place.
 * **Docked Side Panel** $\rightarrow$ Sits alongside your reading material with 1-click switching between **ChatGPT, Claude, Gemini, Perplexity**, or **Fast Free Native AI**.
@@ -32,11 +32,11 @@ When reading complex articles or technical documentation, switching tabs to past
 * **Structured Outlines:** Click **"📑 Outline"** to generate a clear hierarchical breakdown of the article's arguments.
 * **Chat with Entire Webpage:** Click **"💬 Chat Page"** to ground your conversation in the entire article. You can ask: *"What are the limitations mentioned in the conclusion?"* or *"Summarize the experimental findings"*.
 * **Automatic Reading Stats:** Instantly displays reading time and word count (e.g. `📖 ~4 min read (850 words)`).
-* **Right-Click Integration:** Right-click anywhere on any page $\rightarrow$ **"📄 OmniAI: 30s TL;DR of Page"**.
+* **Right-Click Integration:** Right-click anywhere on any page $\rightarrow$ **"📄 Monocle: 30s TL;DR of Page"**.
 
-### 3. 📸 Diagram & Formula Snip Tool (Multimodal Vision — New!)
+### 3. 📸 Diagram & Formula Snip Tool (Multimodal Vision)
 * **Visual Snip Overlay:** Press **`Alt + S`** or click **"📸 Snip"** in the side panel to activate a precision crosshair selection overlay directly on the webpage.
-* **Instant Multimodal AI Analysis:** Snip any flowchart, architecture diagram, or math equation $\rightarrow$ OmniAI automatically crops and renders it into the side panel.
+* **Instant Multimodal AI Analysis:** Snip any flowchart, architecture diagram, or math equation $\rightarrow$ Monocle automatically crops and renders it into the side panel.
 * **Specialized Vision Action Chips:**
   * `📊 Explain Diagram`: Deconstructs components, directional arrows, state flow, and core architecture.
   * `🧮 Explain Formula`: Transcribes mathematical formulas to LaTeX and explains what every variable and symbol represents.
@@ -64,7 +64,7 @@ A persistent native Chrome Side Panel docked on the right side of your window:
 
 ### 6. 🔑 Resilient Free Gemini AI with Live Model Auto-Discovery
 * Supports **Google Gemini 2.0 Flash / 2.5 Flash** via Google AI Studio's 100% free tier (up to 1,500 requests/day at zero cost, no credit card required).
-* **Self-Healing Auto-Discovery:** OmniAI queries Google's live `ModelService.ListModels` to inspect your key's authorized models dynamically and automatically picks the best available free generation model.
+* **Self-Healing Auto-Discovery:** Monocle queries Google's live `ModelService.ListModels` to inspect your key's authorized models dynamically and automatically picks the best available free generation model.
 * **`🔍 Test` Connection Button:** Easily verify your key in Settings and see all available models in real time.
 
 ---
@@ -73,21 +73,17 @@ A persistent native Chrome Side Panel docked on the right side of your window:
 
 ### Works in Google Chrome, Microsoft Edge, Brave, and Opera
 
-1. **Clone or Download this repository:**
-   ```bash
-   git clone https://github.com/Kunalkumar93/Omniai_extension.git
-   ```
-2. Open your browser and go to the extensions manager:
+1. Open your browser and go to the extensions manager:
    * **Chrome / Brave:** `chrome://extensions`
    * **Edge:** `edge://extensions`
-3. Turn **ON** the **"Developer mode"** toggle (usually located in the top-right corner).
-4. Click the **"Load unpacked"** button in the top-left.
-5. Select the `Omniai_extension` folder.
-6. **(Recommended):** Pin the **OmniAI** icon to your browser toolbar for quick 1-click access.
+2. Turn **ON** the **"Developer mode"** toggle (usually located in the top-right corner).
+3. Click the **"Load unpacked"** button in the top-left.
+4. Select this extension directory (`omni-ai-extension`).
+5. **(Recommended):** Pin the **Monocle** icon to your browser toolbar for quick 1-click access.
 
 > [!TIP]
 > **Testing Local Files (like `test-article.html`):**
-> If you test the extension on local computer files (`file:///...`), Chrome disables extensions on local files by default. On `chrome://extensions`, click **"Details"** on the OmniAI card and toggle **ON "Allow access to file URLs"**. (Live web pages like Wikipedia or Medium work automatically without any extra permissions).
+> If you test the extension on local computer files (`file:///...`), Chrome disables extensions on local files by default. On `chrome://extensions`, click **"Details"** on the Monocle card and toggle **ON "Allow access to file URLs"**. (Live web pages like Wikipedia or Medium work automatically without any extra permissions).
 
 ---
 
@@ -109,10 +105,10 @@ A persistent native Chrome Side Panel docked on the right side of your window:
 ## ⚙️ Adding a 100% Free Gemini API Key (Optional)
 
 For sub-second responses inside the in-page floating bubble and the Fast Free AI tab:
-1. Open the OmniAI side panel and click **⚙️ Settings** (top-right gear icon).
+1. Open the Monocle side panel and click **⚙️ Settings** (top-right gear icon).
 2. Click the link to open **[Google AI Studio](https://aistudio.google.com/apikey)**.
 3. Click **"Create API key"** (takes 10 seconds, zero cost, no credit card required).
-4. Paste the key into OmniAI Settings.
+4. Paste the key into Monocle Settings.
 5. Click **`🔍 Test`** $\rightarrow$ A green message `✅ Connected! Found X active models` will confirm your connection.
 6. Click **Save Preferences**.
 
@@ -122,7 +118,7 @@ For sub-second responses inside the in-page floating bubble and the Fast Free AI
 
 | Shortcut | Action |
 | :--- | :--- |
-| `Alt + A` | Open OmniAI Side Panel & sync currently highlighted text |
+| `Alt + A` | Open Monocle Side Panel & sync currently highlighted text |
 | `Alt + S` | Activate Diagram & Formula Snip Tool (Multimodal Vision) |
 | `Esc` | Cancel snip crosshair or dismiss in-page floating pill |
 | `Enter` | Send message in Fast Free AI chat |
@@ -130,31 +126,9 @@ For sub-second responses inside the in-page floating bubble and the Fast Free AI
 
 ---
 
-## 📁 Repository Structure
-
-```
-Omniai_extension/
-├── manifest.json         # Chrome Manifest V3 configuration & permissions
-├── background.js         # Service worker: SidePanel control, context menus, Gemini API proxy
-├── rules/
-│   └── rules.json        # DeclarativeNetRequest rules (strips iframe header restrictions)
-├── content/
-│   ├── content.js        # Content script: Text selection detection & Shadow DOM popover
-│   └── content.css       # Isolated modern CSS design for floating pill and popover
-├── sidepanel/
-│   ├── sidepanel.html    # Side panel UI layout & Settings drawer
-│   ├── sidepanel.css     # Dark mode glassmorphism styles & responsive layout
-│   └── sidepanel.js      # App switcher, active tab sync, and Fast AI chat engine
-├── icons/                # Extension icon assets (16x16, 32x32, 48x48, 128x128)
-├── test-article.html     # Interactive testing article with scientific terminology
-└── README.md             # Documentation and quickstart guide
-```
-
----
-
 ## 🔒 Privacy & Permissions
 
-* **100% Client-Side:** OmniAI runs entirely in your browser. There is no external middleman server collecting your browsing data or reading history.
+* **100% Client-Side:** Monocle runs entirely in your browser. There is no external middleman server collecting your browsing data or reading history.
 * **Direct Connections:** All API requests go directly from your browser to Google AI Studio or your local Ollama/custom server.
 * **Storage:** API keys and user preferences are stored securely in your browser's private `chrome.storage.local`.
 
