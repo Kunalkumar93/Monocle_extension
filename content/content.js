@@ -113,20 +113,33 @@
     hidePopover();
   }
 
-  // Initialize Isolated Shadow DOM
-  function initHost() {
-    hostElement = document.getElementById('monocle-companion-root') || document.getElementById('omni-ai-companion-root');
-    if (!hostElement) {
-      hostElement = document.createElement('div');
-      hostElement.id = 'monocle-companion-root';
-      document.documentElement.appendChild(hostElement);
+  // Initialize or ensure Isolated Shadow DOM is ready
+  function ensureHost() {
+    if (hostElement && pillElement && popoverElement && shadowRoot && hostElement.isConnected) {
+      return true;
     }
-    if (!hostElement.shadowRoot) {
+
+    const oldHost = document.getElementById('monocle-companion-root') || document.getElementById('omni-ai-companion-root');
+    if (oldHost) {
+      try { oldHost.remove(); } catch (e) {}
+    }
+
+    hostElement = document.createElement('div');
+    hostElement.id = 'monocle-companion-root';
+    hostElement.style.cssText = 'all: initial !important; position: fixed !important; top: 0 !important; left: 0 !important; width: 0 !important; height: 0 !important; z-index: 2147483647 !important; border: none !important; margin: 0 !important; padding: 0 !important; pointer-events: none !important;';
+
+    const parent = document.body || document.documentElement;
+    if (!parent) return false;
+    parent.appendChild(hostElement);
+
+    try {
       shadowRoot = hostElement.attachShadow({ mode: 'open' });
       injectStyles();
       createElements();
-    } else {
-      shadowRoot = hostElement.shadowRoot;
+      return true;
+    } catch (err) {
+      console.warn('Monocle shadowRoot attach warning:', err);
+      return false;
     }
   }
 
@@ -142,7 +155,7 @@
         z-index: 2147483647;
       }
       .omni-floating-pill {
-        position: absolute;
+        position: fixed;
         display: flex;
         align-items: center;
         gap: 6px;
@@ -270,7 +283,7 @@
         line-height: 1;
       }
       .omni-popover {
-        position: absolute;
+        position: fixed;
         width: 380px;
         max-width: 90vw;
         background: rgba(15, 17, 26, 0.97);
@@ -544,6 +557,15 @@
 
   // Bind Listeners
   function bindEvents() {
+    // Pill Brand Click (Open Side Panel)
+    const brandEl = shadowRoot.querySelector('.omni-pill-brand');
+    if (brandEl) {
+      brandEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openInSidePanel(currentSelectedText);
+        hidePill();
+      });
+    }
     // Pill Explain Button
     shadowRoot.getElementById('omni-quick-explain-btn').addEventListener('click', (e) => {
       e.stopPropagation();
@@ -630,6 +652,7 @@
   // Open Popover and query AI (with real-time streaming)
   function openPopover(promptPrefix, isTranslation = false) {
     if (!currentSelectedText) return;
+    if (!ensureHost()) return;
     hidePill();
 
     currentPromptPrefix = promptPrefix || '';
@@ -645,18 +668,31 @@
       langSelect.value = currentTargetLanguage;
     }
 
-    // Position popover near selection
+    // Position popover near selection using viewport coordinates
     const selection = window.getSelection();
+    let rect = null;
     if (selection && selection.rangeCount > 0) {
-      const rect = selection.getRangeAt(0).getBoundingClientRect();
-      const popoverWidth = 380;
-      const popoverHeight = 320;
-      let top = rect.bottom + window.scrollY + 10;
-      let left = rect.left + window.scrollX;
+      rect = selection.getRangeAt(0).getBoundingClientRect();
+    }
+    if (!rect || (rect.width === 0 && rect.height === 0)) {
+      const activeEl = document.activeElement;
+      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.isContentEditable)) {
+        rect = activeEl.getBoundingClientRect();
+      }
+    }
+
+    const popoverWidth = 380;
+    const popoverHeight = 320;
+    let top = 100;
+    let left = Math.max(10, Math.round((window.innerWidth - popoverWidth) / 2));
+
+    if (rect && (rect.width > 0 || rect.height > 0 || rect.top > 0 || rect.left > 0)) {
+      top = rect.bottom + 10;
+      left = rect.left;
 
       // Flip above if too close to bottom
-      if (rect.bottom + popoverHeight > window.innerHeight && rect.top > popoverHeight + 20) {
-        top = rect.top + window.scrollY - popoverHeight - 10;
+      if (top + popoverHeight > window.innerHeight && rect.top > popoverHeight + 20) {
+        top = rect.top - popoverHeight - 10;
       }
 
       // Prevent overflow horizontally
@@ -664,9 +700,15 @@
       if (left > maxLeft) left = Math.max(10, maxLeft);
       if (left < 10) left = 10;
 
-      popoverElement.style.top = `${top}px`;
-      popoverElement.style.left = `${left}px`;
+      // Ensure inside viewport vertically
+      if (top < 10) top = 10;
+      if (top + popoverHeight > window.innerHeight - 10) {
+        top = Math.max(10, window.innerHeight - popoverHeight - 10);
+      }
     }
+
+    popoverElement.style.top = `${Math.round(top)}px`;
+    popoverElement.style.left = `${Math.round(left)}px`;
 
     popoverElement.classList.add('visible');
     executeStreamingAiQuery(promptPrefix, isTranslation);
@@ -823,6 +865,7 @@
 
     setTimeout(() => {
       if (!isContextValid()) return;
+      ensureHost();
       const selection = window.getSelection();
       const text = selection ? selection.toString().trim() : '';
 
@@ -833,7 +876,7 @@
       } else {
         hidePill();
       }
-    }, 10);
+    }, 15);
   }
 
   // Named selectionchange handler with debounce and context invalidation protection
@@ -855,46 +898,121 @@
     }, 150);
   }
 
-  // Register selection listeners
-  document.addEventListener('mouseup', handleMouseUp);
-  document.addEventListener('selectionchange', handleSelectionChange);
-
-  // Check if selection is inside form inputs
+  // Check if selection is inside pure input fields (exclude search/password inputs from popup clutter)
   function isSelectionInInput(selection) {
-    if (!selection.anchorNode) return false;
-    const parent = selection.anchorNode.parentElement;
+    if (!selection || !selection.anchorNode) return false;
+    const parent = selection.anchorNode.nodeType === Node.ELEMENT_NODE
+      ? selection.anchorNode
+      : selection.anchorNode.parentElement;
     if (!parent) return false;
-    if (parent.tagName === 'INPUT' || parent.tagName === 'TEXTAREA' || parent.isContentEditable) return true;
-    if (parent.closest && parent.closest('input, textarea, [contenteditable="true"]')) return true;
+    if (parent.tagName === 'INPUT' || parent.tagName === 'TEXTAREA') return true;
+    if (parent.closest && parent.closest('input, textarea')) return true;
     return false;
   }
 
-  // Position floating pill near selection
+  // Position floating pill near selection using viewport coordinates
   function showPillNearSelection(selection) {
-    if (!pillElement || selection.rangeCount === 0) return;
-    const range = selection.getRangeAt(0);
-    const rect = range.getBoundingClientRect();
+    if (!ensureHost()) return;
+    if (!pillElement) return;
 
-    if (rect.width === 0 && rect.height === 0) return;
-
-    const pillWidth = pillElement.offsetWidth || 440;
-    let top = rect.top + window.scrollY - 50;
-    let left = rect.left + window.scrollX + (rect.width / 2) - (pillWidth / 2);
-
-    // Flip below selection if too close to page top
-    if (rect.top < 65) {
-      top = rect.bottom + window.scrollY + 10;
+    let rect = null;
+    if (selection && selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0);
+      rect = range.getBoundingClientRect();
     }
 
-    // Keep within horizontal bounds
-    const maxLeft = window.innerWidth - pillWidth - 16;
+    // Fallback if selection is inside an input/textarea or has 0 dimensions
+    if (!rect || (rect.width === 0 && rect.height === 0)) {
+      const activeEl = document.activeElement;
+      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.isContentEditable)) {
+        rect = activeEl.getBoundingClientRect();
+      }
+    }
+
+    if (!rect || (rect.width === 0 && rect.height === 0)) return;
+
+    const pillWidth = pillElement.offsetWidth || 380;
+    const pillHeight = pillElement.offsetHeight || 38;
+
+    // Viewport-relative coordinates (no window.scrollY/X because pill is position: fixed)
+    let left = rect.left + (rect.width / 2) - (pillWidth / 2);
+    let top = rect.top - pillHeight - 10;
+
+    // Flip below selection if too close to viewport top
+    if (top < 10) {
+      top = rect.bottom + 10;
+    }
+
+    // Keep within horizontal viewport bounds with 10px margin
+    const maxLeft = window.innerWidth - pillWidth - 10;
     if (left > maxLeft) left = Math.max(10, maxLeft);
     if (left < 10) left = 10;
 
-    pillElement.style.top = `${top}px`;
-    pillElement.style.left = `${left}px`;
+    // Keep within vertical viewport bounds
+    if (top + pillHeight > window.innerHeight - 10) {
+      top = Math.max(10, window.innerHeight - pillHeight - 10);
+    }
+
+    pillElement.style.top = `${Math.round(top)}px`;
+    pillElement.style.left = `${Math.round(left)}px`;
     pillElement.classList.add('visible');
   }
+
+  // Register selection and action listeners
+  document.addEventListener('mouseup', handleMouseUp);
+  document.addEventListener('selectionchange', handleSelectionChange);
+
+  // Trigger pill on copy event (Ctrl+C, Cmd+C, or context-menu copy)
+  document.addEventListener('copy', () => {
+    if (!isContextValid()) return;
+    setTimeout(() => {
+      if (!isContextValid()) return;
+      ensureHost();
+      let text = '';
+      const selection = window.getSelection();
+      if (selection) {
+        text = selection.toString().trim();
+      }
+      if (!text) {
+        const active = document.activeElement;
+        if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
+          const s = active.selectionStart;
+          const e = active.selectionEnd;
+          if (s !== null && e !== null && e > s) {
+            text = active.value.substring(s, e).trim();
+          }
+        }
+      }
+      if (text.length >= 2) {
+        currentSelectedText = text;
+        showPillNearSelection(selection);
+        syncSelectionToSidePanel(text);
+      }
+    }, 25);
+  });
+
+  // Trigger pill on keyboard text selection (Shift + Arrows, Ctrl+A)
+  document.addEventListener('keyup', (e) => {
+    if (!isContextValid()) return;
+    if (e.shiftKey || ((e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A'))) {
+      setTimeout(() => {
+        if (!isContextValid()) return;
+        ensureHost();
+        const selection = window.getSelection();
+        const text = selection ? selection.toString().trim() : '';
+        if (text.length >= 2 && !isSelectionInInput(selection)) {
+          currentSelectedText = text;
+          showPillNearSelection(selection);
+          syncSelectionToSidePanel(text);
+        }
+      }, 40);
+    }
+  });
+
+  // Hide pill during scroll so it doesn't float disconnectedly
+  window.addEventListener('scroll', () => {
+    hidePill();
+  }, { passive: true });
 
   // Close when clicking outside or pressing Escape
   document.addEventListener('mousedown', (e) => {
@@ -931,6 +1049,7 @@
   let snipOverlay = null;
 
   function startSnippingTool() {
+    if (!ensureHost()) return;
     if (snipOverlay) return;
 
     snipOverlay = document.createElement('div');
@@ -1110,5 +1229,9 @@
   }
 
   // Initialize
-  initHost();
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', ensureHost);
+  } else {
+    ensureHost();
+  }
 })();

@@ -794,10 +794,18 @@ async function callGeminiApi(apiKey, fullPrompt, preferredModel) {
 // Fallback intelligent parser when user hasn't added an API key yet
 function generateQuickSmartAnalysis(text, prompt) {
   const wordCount = text.trim().split(/\s+/).length;
+  const isTranslation = prompt && prompt.toLowerCase().includes('translat');
   const sentences = text.split(/(?<=[.?!])\s+/).filter(s => s.trim().length > 0);
   
   let keyIdea = sentences[0] || text.slice(0, 120);
   if (keyIdea.length > 150) keyIdea = keyIdea.slice(0, 145) + '...';
+
+  if (isTranslation) {
+    return `### 🌐 Quick Translation Preview:\n\n` +
+      `• **Original Text:** "${keyIdea}"\n` +
+      `• **Target:** Selected language (${wordCount} words analyzed)\n` +
+      `• **Action:** Enter your **100% Free Google Gemini API key** in Monocle Settings (or open ChatGPT / Claude in the Side Panel) for instant high-precision AI translation with vocabulary nuance breakdown!`;
+  }
 
   return `### 💡 Quick Breakdown:\n\n` +
     `• **Core Idea:** ${keyIdea}\n` +

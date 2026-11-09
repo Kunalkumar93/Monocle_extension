@@ -8,7 +8,7 @@
 
 /* Floating Action Pill */
 .omni-floating-pill {
-  position: absolute;
+  position: fixed;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -154,7 +154,7 @@
 
 /* In-Page Popover Modal / Card */
 .omni-popover {
-  position: absolute;
+  position: fixed;
   width: 380px;
   max-width: 90vw;
   background: rgba(15, 17, 26, 0.97);
