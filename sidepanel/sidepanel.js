@@ -526,7 +526,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const msgEl = document.createElement('div');
     msgEl.className = `message ${sender}-message`;
 
-    const avatar = sender === 'user' ? '👤' : '✨';
+    const avatar = sender === 'user' ? '👤' : '🧐';
     msgEl.innerHTML = `
       <div class="msg-avatar">${avatar}</div>
       <div class="msg-content">${isHtml ? content : renderMarkdown(content)}</div>
@@ -606,7 +606,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (activeEngine === 'fast-ai') {
       chatMessages.innerHTML = `
         <div class="message system-message">
-          <div class="msg-avatar">✨</div>
+          <div class="msg-avatar">🧐</div>
           <div class="msg-content">
             <strong>Chat reset!</strong>
             <p>Highlight text in any tab to ask questions or summarize.</p>

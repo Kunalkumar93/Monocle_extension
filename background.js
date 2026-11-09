@@ -802,5 +802,5 @@ function generateQuickSmartAnalysis(text, prompt) {
   return `### 💡 Quick Breakdown:\n\n` +
     `• **Core Idea:** ${keyIdea}\n` +
     `• **Context:** Selection of ~${wordCount} words from the current page.\n` +
-    `• **Action:** For deep live answers, open **ChatGPT / Claude** in the side panel or add your **100% Free Gemini API key** in OmniAI settings!`;
+    `• **Action:** For deep live answers, open **ChatGPT / Claude** in the side panel or add your **100% Free Gemini API key** in Monocle settings!`;
 }

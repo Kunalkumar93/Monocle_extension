@@ -5,6 +5,11 @@
   window.__monocleInitialized = true;
   window.__omniAiInitialized = true;
 
+  // Ignore tiny/hidden iframes (e.g. ads, tracking pixels, 0x0 frames)
+  if (window.top !== window.self && (window.innerWidth < 150 || window.innerHeight < 150)) {
+    return;
+  }
+
   let currentSelectedText = '';
   let shadowRoot = null;
   let pillElement = null;
@@ -15,6 +20,49 @@
   let activeStreamPort = null;
   let currentIsTranslation = false;
   let currentPromptPrefix = '';
+
+  // Trusted Types policy for YouTube & strict CSP compatibility
+  let trustedPolicy = null;
+  function getTrustedPolicy() {
+    if (trustedPolicy !== null) return trustedPolicy;
+    try {
+      if (typeof window !== 'undefined' && window.trustedTypes && window.trustedTypes.createPolicy) {
+        trustedPolicy = window.trustedTypes.createPolicy('monoclePolicy', {
+          createHTML: (string) => string
+        });
+      }
+    } catch (e) {
+      try {
+        trustedPolicy = window.trustedTypes.defaultPolicy || { createHTML: (s) => s };
+      } catch (e2) {
+        trustedPolicy = { createHTML: (s) => s };
+      }
+    }
+    return trustedPolicy;
+  }
+
+  function setElementHTML(element, htmlString) {
+    if (!element) return;
+    try {
+      const policy = getTrustedPolicy();
+      if (policy && typeof policy.createHTML === 'function') {
+        element.innerHTML = policy.createHTML(htmlString);
+        return;
+      }
+    } catch (e) {}
+
+    try {
+      element.innerHTML = htmlString;
+    } catch (err) {
+      try {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(htmlString, 'text/html');
+        element.replaceChildren(...doc.body.childNodes);
+      } catch (e3) {
+        element.textContent = htmlString;
+      }
+    }
+  }
 
   // Load user language preference
   try {
@@ -82,56 +130,348 @@
     }
   }
 
-  // Inject CSS into Shadow DOM (Immune to page CSP connect-src restrictions)
+  // Inject CSS directly into Shadow DOM (100% inline, zero network requests, immune to page CSP/CORS)
   function injectStyles() {
     if (!shadowRoot) return;
 
-    // 1. Core styles embedded directly so elements display instantly without fetch()
     const coreStyle = document.createElement('style');
     coreStyle.textContent = `
-      :host { all: initial; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; z-index: 2147483647; }
-      .omni-floating-pill { position: absolute; display: flex; align-items: center; gap: 6px; background: rgba(18, 20, 29, 0.95); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.15); box-shadow: 0 10px 30px rgba(0,0,0,0.5), 0 0 0 1px rgba(99, 102, 241, 0.2); border-radius: 9999px; padding: 5px 8px; z-index: 2147483647; opacity: 0; transform: translateY(6px) scale(0.96); pointer-events: none; transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1); color: #f3f4f6; user-select: none; }
-      .omni-floating-pill.visible { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
-      .omni-pill-brand { display: flex; align-items: center; gap: 6px; padding: 0 6px 0 2px; border-right: 1px solid rgba(255, 255, 255, 0.12); cursor: pointer; }
-      .omni-pill-icon { width: 18px; height: 18px; border-radius: 50%; background: linear-gradient(135deg, #6366f1, #a855f7, #06b6d4); display: flex; align-items: center; justify-content: center; font-size: 10px; }
-      .omni-pill-title { font-size: 12px; font-weight: 700; background: linear-gradient(135deg, #e0e7ff, #c084fc); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-      .omni-btn { display: inline-flex; align-items: center; gap: 5px; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.1); color: #e5e7eb; padding: 5px 10px; border-radius: 9999px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s ease; white-space: nowrap; }
-      .omni-btn:hover { background: rgba(99, 102, 241, 0.25); border-color: rgba(99, 102, 241, 0.5); color: #ffffff; }
-      .omni-btn-primary { background: linear-gradient(135deg, #4f46e5, #7c3aed); border: 1px solid rgba(168, 85, 247, 0.4); color: #ffffff; }
-      .omni-btn-translate { background: linear-gradient(135deg, #0ea5e9, #6366f1); border: 1px solid rgba(56, 189, 248, 0.4); color: #ffffff; }
-      .omni-lang-badge { background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.18); color: #c7d2fe; font-size: 11px; font-weight: 600; padding: 2px 6px; border-radius: 4px; outline: none; cursor: pointer; }
-      .omni-lang-badge option { background: #131620; color: #f3f4f6; }
-      .omni-cursor { display: inline-block; width: 6px; height: 13px; background: #818cf8; margin-left: 2px; vertical-align: middle; border-radius: 1px; animation: omni-blink 0.8s infinite; }
-      @keyframes omni-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
-      .omni-popover { position: absolute; width: 380px; max-width: calc(100vw - 30px); background: rgba(18, 20, 29, 0.96); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 12px; box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(99, 102, 241, 0.25); z-index: 2147483647; opacity: 0; transform: translateY(6px) scale(0.97); pointer-events: none; transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1); display: flex; flex-direction: column; overflow: hidden; color: #f3f4f6; }
-      .omni-popover.visible { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
-      .omni-popover-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: rgba(255, 255, 255, 0.04); border-bottom: 1px solid rgba(255, 255, 255, 0.08); font-size: 12.5px; font-weight: 600; color: #a5b4fc; }
-      .omni-popover-actions { display: flex; align-items: center; gap: 4px; }
-      .omni-icon-btn { background: transparent; border: none; color: #9ca3af; font-size: 13px; cursor: pointer; padding: 4px 6px; border-radius: 4px; }
-      .omni-icon-btn:hover { background: rgba(255, 255, 255, 0.1); color: #ffffff; }
-      .omni-popover-body { padding: 14px; font-size: 13px; line-height: 1.6; max-height: 280px; overflow-y: auto; color: #e5e7eb; }
-      .omni-popover-footer { display: flex; align-items: center; gap: 6px; padding: 10px 14px; background: rgba(255, 255, 255, 0.02); border-top: 1px solid rgba(255, 255, 255, 0.08); }
-      .omni-quick-input { flex: 1; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 6px; padding: 6px 10px; color: #ffffff; font-size: 12px; outline: none; }
-      .omni-quick-input:focus { border-color: #6366f1; }
-      .omni-spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255, 255, 255, 0.3); border-radius: 50%; border-top-color: #6366f1; animation: omni-spin 0.8s linear infinite; margin-right: 8px; vertical-align: middle; }
-      @keyframes omni-spin { to { transform: rotate(360deg); } }
-      .omni-toast { position: absolute; bottom: 50px; left: 50%; transform: translateX(-50%) translateY(10px); background: rgba(16, 185, 129, 0.95); color: #ffffff; padding: 6px 12px; border-radius: 6px; font-size: 11.5px; font-weight: 600; opacity: 0; pointer-events: none; transition: all 0.2s ease; z-index: 10; }
-      .omni-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+      :host {
+        all: initial;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        z-index: 2147483647;
+      }
+      .omni-floating-pill {
+        position: absolute;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        background: rgba(18, 20, 29, 0.94);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(99, 102, 241, 0.2);
+        border-radius: 9999px;
+        padding: 5px 8px;
+        z-index: 2147483647;
+        opacity: 0;
+        transform: translateY(6px) scale(0.96);
+        pointer-events: none;
+        transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        color: #f3f4f6;
+        user-select: none;
+      }
+      .omni-floating-pill.visible {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+        pointer-events: auto;
+      }
+      .omni-pill-brand {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0 6px 0 2px;
+        border-right: 1px solid rgba(255, 255, 255, 0.12);
+        cursor: pointer;
+      }
+      .omni-pill-icon {
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #6366f1, #a855f7, #06b6d4);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
+        box-shadow: 0 0 10px rgba(99, 102, 241, 0.6);
+      }
+      .omni-pill-title {
+        font-size: 12px;
+        font-weight: 700;
+        background: linear-gradient(135deg, #e0e7ff, #c084fc);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+      }
+      .omni-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        color: #e5e7eb;
+        padding: 5px 10px;
+        border-radius: 9999px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        white-space: nowrap;
+      }
+      .omni-btn:hover {
+        background: rgba(99, 102, 241, 0.25);
+        border-color: rgba(99, 102, 241, 0.5);
+        color: #ffffff;
+        transform: translateY(-1px);
+      }
+      .omni-btn-primary {
+        background: linear-gradient(135deg, #4f46e5, #7c3aed);
+        border: 1px solid rgba(168, 85, 247, 0.4);
+        color: #ffffff;
+      }
+      .omni-btn-primary:hover {
+        background: linear-gradient(135deg, #4338ca, #6d28d9);
+        box-shadow: 0 0 12px rgba(99, 102, 241, 0.5);
+      }
+      .omni-btn-translate {
+        background: linear-gradient(135deg, #0284c7, #6366f1);
+        border: 1px solid rgba(56, 189, 248, 0.4);
+        color: #ffffff;
+      }
+      .omni-btn-translate:hover {
+        background: linear-gradient(135deg, #0369a1, #4f46e5);
+        box-shadow: 0 0 12px rgba(14, 165, 233, 0.5);
+      }
+      .omni-lang-badge {
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        color: #c7d2fe;
+        font-size: 11px;
+        font-weight: 600;
+        padding: 2px 6px;
+        border-radius: 4px;
+        outline: none;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+      .omni-lang-badge:hover {
+        background: rgba(255, 255, 255, 0.15);
+        border-color: #818cf8;
+      }
+      .omni-lang-badge option {
+        background: #131620;
+        color: #f3f4f6;
+      }
+      .omni-cursor {
+        display: inline-block;
+        width: 6px;
+        height: 14px;
+        background-color: #818cf8;
+        margin-left: 3px;
+        vertical-align: middle;
+        border-radius: 1px;
+        animation: omni-blink 0.8s infinite;
+      }
+      @keyframes omni-blink {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0; }
+      }
+      .omni-btn-icon {
+        font-size: 13px;
+        line-height: 1;
+      }
+      .omni-popover {
+        position: absolute;
+        width: 380px;
+        max-width: 90vw;
+        background: rgba(15, 17, 26, 0.97);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border: 1px solid rgba(99, 102, 241, 0.3);
+        box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.1);
+        border-radius: 16px;
+        overflow: hidden;
+        z-index: 2147483647;
+        opacity: 0;
+        transform: translateY(8px) scale(0.97);
+        pointer-events: none;
+        transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        color: #e5e7eb;
+      }
+      .omni-popover.visible {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+        pointer-events: auto;
+      }
+      .omni-popover-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 14px;
+        background: rgba(255, 255, 255, 0.04);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      .omni-popover-header-left {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        font-weight: 600;
+        color: #f3f4f6;
+      }
+      .omni-popover-actions {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .omni-icon-btn {
+        background: transparent;
+        border: none;
+        color: #9ca3af;
+        width: 26px;
+        height: 26px;
+        border-radius: 6px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 13px;
+        transition: all 0.15s ease;
+      }
+      .omni-icon-btn:hover {
+        background: rgba(255, 255, 255, 0.1);
+        color: #ffffff;
+      }
+      .omni-popover-body {
+        padding: 14px;
+        max-height: 260px;
+        overflow-y: auto;
+        font-size: 13.5px;
+        line-height: 1.6;
+        color: #d1d5db;
+      }
+      .omni-popover-body::-webkit-scrollbar {
+        width: 5px;
+      }
+      .omni-popover-body::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.15);
+        border-radius: 4px;
+      }
+      .omni-popover-body p {
+        margin: 0 0 10px 0;
+      }
+      .omni-popover-body ul {
+        margin: 0 0 10px 0;
+        padding-left: 20px;
+      }
+      .omni-popover-body li {
+        margin-bottom: 5px;
+      }
+      .omni-popover-body strong {
+        color: #f9fafb;
+      }
+      .omni-popover-footer {
+        padding: 8px 12px;
+        background: rgba(255, 255, 255, 0.02);
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .omni-quick-input {
+        flex: 1;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 8px;
+        padding: 6px 10px;
+        font-size: 12px;
+        color: #ffffff;
+        outline: none;
+        transition: border-color 0.15s;
+      }
+      .omni-quick-input:focus {
+        border-color: #6366f1;
+      }
+      .omni-quick-input::placeholder {
+        color: #6b7280;
+      }
+      .omni-spinner {
+        width: 18px;
+        height: 18px;
+        border: 2px solid rgba(255, 255, 255, 0.2);
+        border-top-color: #818cf8;
+        border-radius: 50%;
+        animation: omni-spin 0.8s linear infinite;
+        display: inline-block;
+        margin-right: 6px;
+        vertical-align: middle;
+      }
+      @keyframes omni-spin {
+        to { transform: rotate(360deg); }
+      }
+      .omni-toast {
+        position: absolute;
+        bottom: 50px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #10b981;
+        color: white;
+        padding: 4px 10px;
+        font-size: 11px;
+        font-weight: 600;
+        border-radius: 6px;
+        opacity: 0;
+        transition: opacity 0.2s ease;
+        pointer-events: none;
+      }
+      .omni-toast.show {
+        opacity: 1;
+      }
+      .omni-snip-overlay {
+        position: fixed;
+        inset: 0;
+        width: 100vw;
+        height: 100vh;
+        z-index: 2147483646;
+        cursor: crosshair;
+        background: rgba(0, 0, 0, 0.32);
+        user-select: none;
+        animation: omni-fade-in 0.15s ease-out;
+      }
+      @keyframes omni-fade-in {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+      .omni-snip-banner {
+        position: fixed;
+        top: 24px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(18, 20, 29, 0.96);
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(99, 102, 241, 0.5);
+        padding: 8px 18px;
+        border-radius: 9999px;
+        color: #f3f4f6;
+        font-size: 13px;
+        font-weight: 600;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), 0 0 15px rgba(99, 102, 241, 0.3);
+        pointer-events: none;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .omni-snip-box {
+        position: fixed;
+        border: 2px dashed #818cf8;
+        background: rgba(99, 102, 241, 0.12);
+        box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+        pointer-events: none;
+        border-radius: 4px;
+      }
+      .omni-snip-dims {
+        position: absolute;
+        bottom: -22px;
+        right: 0;
+        background: #4f46e5;
+        color: #ffffff;
+        font-size: 10px;
+        font-weight: 700;
+        padding: 1px 6px;
+        border-radius: 4px;
+        letter-spacing: 0.3px;
+      }
     `;
     shadowRoot.appendChild(coreStyle);
-
-    // 2. Link full stylesheet from web_accessible_resources without using fetch()
-    if (isContextValid()) {
-      try {
-        const link = document.createElement('link');
-        link.rel = 'stylesheet';
-        link.type = 'text/css';
-        link.href = chrome.runtime.getURL('content/content.css');
-        shadowRoot.appendChild(link);
-      } catch (e) {
-        // Fallback core style remains active
-      }
-    }
   }
 
   // Create UI Elements inside Shadow DOM
@@ -139,7 +479,7 @@
     // 1. Floating Pill
     pillElement = document.createElement('div');
     pillElement.className = 'omni-floating-pill';
-    pillElement.innerHTML = `
+    setElementHTML(pillElement, `
       <div class="omni-pill-brand" title="Monocle Companion">
         <div class="omni-pill-icon">🧐</div>
         <span class="omni-pill-title">Monocle</span>
@@ -156,13 +496,13 @@
       <button class="omni-btn" id="omni-summarize-btn" title="Summarize in bullets">
         <span class="omni-btn-icon">📋</span> Summary
       </button>
-    `;
+    `);
     shadowRoot.appendChild(pillElement);
 
     // 2. Popover Card
     popoverElement = document.createElement('div');
     popoverElement.className = 'omni-popover';
-    popoverElement.innerHTML = `
+    setElementHTML(popoverElement, `
       <div class="omni-popover-header">
         <div class="omni-popover-header-left" style="display: flex; align-items: center; gap: 6px;">
           <span style="font-size: 15px;">🧐</span>
@@ -196,7 +536,7 @@
         <button class="omni-btn omni-btn-primary" id="omni-followup-send-btn">Ask</button>
       </div>
       <div class="omni-toast" id="omni-toast">Copied to clipboard!</div>
-    `;
+    `);
     shadowRoot.appendChild(popoverElement);
 
     bindEvents();
@@ -309,11 +649,18 @@
     const selection = window.getSelection();
     if (selection && selection.rangeCount > 0) {
       const rect = selection.getRangeAt(0).getBoundingClientRect();
+      const popoverWidth = 380;
+      const popoverHeight = 320;
       let top = rect.bottom + window.scrollY + 10;
       let left = rect.left + window.scrollX;
 
-      // Prevent overflow
-      const maxLeft = window.innerWidth - 400;
+      // Flip above if too close to bottom
+      if (rect.bottom + popoverHeight > window.innerHeight && rect.top > popoverHeight + 20) {
+        top = rect.top + window.scrollY - popoverHeight - 10;
+      }
+
+      // Prevent overflow horizontally
+      const maxLeft = window.innerWidth - popoverWidth - 16;
       if (left > maxLeft) left = Math.max(10, maxLeft);
       if (left < 10) left = 10;
 
@@ -328,7 +675,7 @@
   // Execute Streaming AI Query via Long-Lived Background Port
   function executeStreamingAiQuery(promptPrefix, isTranslation = false) {
     const contentEl = shadowRoot.getElementById('omni-popover-content');
-    contentEl.innerHTML = `<p><span class="omni-spinner"></span>${isTranslation ? `Translating to ${currentTargetLanguage}...` : 'Analyzing selected text...'}</p>`;
+    setElementHTML(contentEl, `<p><span class="omni-spinner"></span>${isTranslation ? `Translating to ${currentTargetLanguage}...` : 'Analyzing selected text...'}</p>`);
 
     if (activeStreamPort) {
       try { activeStreamPort.disconnect(); } catch (e) {}
@@ -349,9 +696,9 @@
         },
         (response) => {
           if (response && response.success) {
-            contentEl.innerHTML = renderMarkdown(response.text);
+            setElementHTML(contentEl, renderMarkdown(response.text));
           } else {
-            contentEl.innerHTML = `<p style="color: #f87171;">⚠️ ${(response && response.error) || 'Failed to get answer'}</p>`;
+            setElementHTML(contentEl, `<p style="color: #f87171;">⚠️ ${(response && response.error) || 'Failed to get answer'}</p>`);
           }
         }
       );
@@ -365,18 +712,18 @@
       if (msg.type === 'CHUNK') {
         if (!receivedFirstChunk) {
           receivedFirstChunk = true;
-          contentEl.innerHTML = '';
+          setElementHTML(contentEl, '');
         }
         accumulatedText += msg.text;
-        contentEl.innerHTML = renderMarkdown(accumulatedText) + '<span class="omni-cursor"></span>';
+        setElementHTML(contentEl, renderMarkdown(accumulatedText) + '<span class="omni-cursor"></span>');
         contentEl.scrollTop = contentEl.scrollHeight;
       } else if (msg.type === 'DONE') {
-        contentEl.innerHTML = renderMarkdown(accumulatedText);
+        setElementHTML(contentEl, renderMarkdown(accumulatedText));
         contentEl.scrollTop = contentEl.scrollHeight;
         try { port.disconnect(); } catch (e) {}
         activeStreamPort = null;
       } else if (msg.type === 'ERROR') {
-        contentEl.innerHTML = `<p style="color: #f87171;">⚠️ ${msg.error || 'Failed to stream response'}</p>`;
+        setElementHTML(contentEl, `<p style="color: #f87171;">⚠️ ${msg.error || 'Failed to stream response'}</p>`);
         try { port.disconnect(); } catch (e) {}
         activeStreamPort = null;
       }
@@ -384,6 +731,10 @@
 
     port.onDisconnect.addListener(() => {
       activeStreamPort = null;
+      if (!receivedFirstChunk) {
+        const errMsg = (chrome.runtime.lastError && chrome.runtime.lastError.message) || 'Stream disconnected. Check settings or refresh.';
+        setElementHTML(contentEl, `<p style="color: #f87171;">⚠️ ${errMsg}</p>`);
+      }
     });
 
     port.postMessage({
@@ -464,8 +815,11 @@
       return;
     }
 
-    // If click inside our Shadow DOM, ignore
-    if (e.target && e.target.id === 'omni-ai-companion-root') return;
+    // If click originated inside our Shadow DOM, ignore completely so UI controls work
+    const isInsideHost = e.composedPath
+      ? (hostElement && e.composedPath().includes(hostElement))
+      : (e.target === hostElement || (hostElement && hostElement.contains(e.target)));
+    if (isInsideHost) return;
 
     setTimeout(() => {
       if (!isContextValid()) return;
@@ -509,7 +863,10 @@
   function isSelectionInInput(selection) {
     if (!selection.anchorNode) return false;
     const parent = selection.anchorNode.parentElement;
-    return parent && (parent.tagName === 'INPUT' || parent.tagName === 'TEXTAREA' || parent.isContentEditable);
+    if (!parent) return false;
+    if (parent.tagName === 'INPUT' || parent.tagName === 'TEXTAREA' || parent.isContentEditable) return true;
+    if (parent.closest && parent.closest('input, textarea, [contenteditable="true"]')) return true;
+    return false;
   }
 
   // Position floating pill near selection
@@ -520,17 +877,19 @@
 
     if (rect.width === 0 && rect.height === 0) return;
 
-    let top = rect.top + window.scrollY - 48;
-    let left = rect.left + window.scrollX + (rect.width / 2) - 100;
+    const pillWidth = pillElement.offsetWidth || 440;
+    let top = rect.top + window.scrollY - 50;
+    let left = rect.left + window.scrollX + (rect.width / 2) - (pillWidth / 2);
 
     // Flip below selection if too close to page top
-    if (rect.top < 60) {
+    if (rect.top < 65) {
       top = rect.bottom + window.scrollY + 10;
     }
 
     // Keep within horizontal bounds
+    const maxLeft = window.innerWidth - pillWidth - 16;
+    if (left > maxLeft) left = Math.max(10, maxLeft);
     if (left < 10) left = 10;
-    if (left > window.innerWidth - 280) left = window.innerWidth - 280;
 
     pillElement.style.top = `${top}px`;
     pillElement.style.left = `${left}px`;
@@ -539,8 +898,10 @@
 
   // Close when clicking outside or pressing Escape
   document.addEventListener('mousedown', (e) => {
-    const host = document.getElementById('monocle-companion-root') || document.getElementById('omni-ai-companion-root');
-    if (host && !host.contains(e.target)) {
+    const isInsideHost = e.composedPath
+      ? (hostElement && e.composedPath().includes(hostElement))
+      : (e.target === hostElement || (hostElement && hostElement.contains(e.target)));
+    if (!isInsideHost) {
       hidePill();
     }
   });
@@ -574,14 +935,14 @@
 
     snipOverlay = document.createElement('div');
     snipOverlay.className = 'omni-snip-overlay';
-    snipOverlay.innerHTML = `
+    setElementHTML(snipOverlay, `
       <div class="omni-snip-banner">
         <span>📸 Drag to snip diagram, chart, or formula • Press <strong>Esc</strong> to cancel</span>
       </div>
       <div class="omni-snip-box" id="omni-snip-box" style="display: none;">
         <span class="omni-snip-dims" id="omni-snip-dims"></span>
       </div>
-    `;
+    `);
 
     shadowRoot.appendChild(snipOverlay);
 
