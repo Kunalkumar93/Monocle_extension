@@ -108,7 +108,14 @@
 
   // Cleanup orphaned event listeners when extension is reloaded
   function cleanupOrphanedScript() {
-    document.removeEventListener('mouseup', handleMouseUp);
+    window.removeEventListener('mouseup', handleMouseUp, true);
+    document.removeEventListener('mouseup', handleMouseUp, true);
+    window.removeEventListener('mousedown', handleMouseDown, true);
+    document.removeEventListener('mousedown', handleMouseDown, true);
+    window.removeEventListener('copy', handleCopy, true);
+    document.removeEventListener('copy', handleCopy, true);
+    window.removeEventListener('keyup', handleKeyUp, true);
+    document.removeEventListener('keyup', handleKeyUp, true);
     document.removeEventListener('selectionchange', handleSelectionChange);
     hidePill();
     hidePopover();
@@ -755,7 +762,23 @@
     const selection = window.getSelection();
     let rect = null;
     if (selection && selection.rangeCount > 0) {
-      rect = selection.getRangeAt(0).getBoundingClientRect();
+      try {
+        const range = selection.getRangeAt(0);
+        rect = range.getBoundingClientRect();
+        if ((!rect || (rect.width === 0 && rect.height === 0)) && range.getClientRects) {
+          const clientRects = range.getClientRects();
+          if (clientRects.length > 0) rect = clientRects[0];
+        }
+      } catch (err) {}
+    }
+    if (!rect || (rect.width === 0 && rect.height === 0)) {
+      try {
+        const node = selection ? selection.anchorNode : null;
+        const el = node ? (node.nodeType === 1 ? node : (node.parentElement || node.parentNode)) : null;
+        if (el && el.getBoundingClientRect) {
+          rect = el.getBoundingClientRect();
+        }
+      } catch (err) {}
     }
     if (!rect || (rect.width === 0 && rect.height === 0)) {
       const activeEl = document.activeElement;
@@ -946,6 +969,8 @@
       : (e.target === hostElement || (hostElement && hostElement.contains(e.target)));
     if (isInsideHost) return;
 
+    const mousePos = (e && typeof e.clientX === 'number') ? { clientX: e.clientX, clientY: e.clientY } : null;
+
     setTimeout(() => {
       if (!isContextValid()) return;
       ensureHost();
@@ -954,12 +979,12 @@
 
       if (text.length >= 2 && !isSelectionInInput(selection)) {
         currentSelectedText = text;
-        showPillNearSelection(selection);
+        showPillNearSelection(selection, mousePos);
         syncSelectionToSidePanel(text);
       } else {
         hidePill();
       }
-    }, 15);
+    }, 20);
   }
 
   // Named selectionchange handler with debounce and context invalidation protection
@@ -984,31 +1009,46 @@
   // Check if selection is inside pure input fields (exclude search/password inputs from popup clutter)
   function isSelectionInInput(selection) {
     if (!selection || !selection.anchorNode) return false;
-    const parent = selection.anchorNode.nodeType === 1
-      ? selection.anchorNode
-      : (selection.anchorNode.parentElement || selection.anchorNode.parentNode);
-    if (!parent) return false;
-    if (parent.tagName === 'INPUT' || parent.tagName === 'TEXTAREA') return true;
-    if (parent.closest && parent.closest('input, textarea')) return true;
+    try {
+      const parent = selection.anchorNode.nodeType === 1
+        ? selection.anchorNode
+        : (selection.anchorNode.parentElement || selection.anchorNode.parentNode);
+      if (!parent) return false;
+      if (parent.tagName === 'INPUT' || parent.tagName === 'TEXTAREA') return true;
+      if (parent.closest && parent.closest('input, textarea')) return true;
+    } catch (e) {}
     return false;
   }
 
   // Position floating pill near selection using viewport coordinates
-  function showPillNearSelection(selection) {
+  function showPillNearSelection(selection, mousePos) {
     if (!ensureHost()) return;
     if (!pillElement) return;
 
     let rect = null;
     if (selection && selection.rangeCount > 0) {
-      const range = selection.getRangeAt(0);
-      rect = range.getBoundingClientRect();
-      if ((!rect || (rect.width === 0 && rect.height === 0)) && range.getClientRects) {
-        const clientRects = range.getClientRects();
-        if (clientRects.length > 0) rect = clientRects[0];
-      }
+      try {
+        const range = selection.getRangeAt(0);
+        rect = range.getBoundingClientRect();
+        if ((!rect || (rect.width === 0 && rect.height === 0)) && range.getClientRects) {
+          const clientRects = range.getClientRects();
+          if (clientRects.length > 0) rect = clientRects[0];
+        }
+      } catch (err) {}
     }
 
-    // Fallback if selection is inside an input/textarea or has 0 dimensions
+    // Fallback 1: Anchor element's bounding rect (crucial for YouTube/Shadow DOM text)
+    if (!rect || (rect.width === 0 && rect.height === 0)) {
+      try {
+        const node = selection ? selection.anchorNode : null;
+        const el = node ? (node.nodeType === 1 ? node : (node.parentElement || node.parentNode)) : null;
+        if (el && el.getBoundingClientRect) {
+          rect = el.getBoundingClientRect();
+        }
+      } catch (err) {}
+    }
+
+    // Fallback 2: Active element if input/textarea
     if (!rect || (rect.width === 0 && rect.height === 0)) {
       const activeEl = document.activeElement;
       if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.isContentEditable)) {
@@ -1016,18 +1056,29 @@
       }
     }
 
-    if (!rect || (rect.width === 0 && rect.height === 0)) return;
-
     const pillWidth = pillElement.offsetWidth || 440;
     const pillHeight = pillElement.offsetHeight || 38;
 
-    // Viewport-relative coordinates (no window.scrollY/X because pill is position: fixed)
-    let left = rect.left + (rect.width / 2) - (pillWidth / 2);
-    let top = rect.top - pillHeight - 10;
+    let left = 0;
+    let top = 0;
 
-    // Flip below selection if too close to viewport top
-    if (top < 10) {
-      top = rect.bottom + 10;
+    if (rect && (rect.width > 0 || rect.height > 0 || rect.top > 0 || rect.left > 0)) {
+      left = rect.left + (rect.width / 2) - (pillWidth / 2);
+      top = rect.top - pillHeight - 10;
+      if (top < 10) {
+        top = rect.bottom + 10;
+      }
+    } else if (mousePos && typeof mousePos.clientX === 'number') {
+      // Fallback 3: Mouse cursor position
+      left = mousePos.clientX - (pillWidth / 2);
+      top = mousePos.clientY - pillHeight - 15;
+      if (top < 10) {
+        top = mousePos.clientY + 20;
+      }
+    } else {
+      // Fallback 4: Center top of viewport
+      left = (window.innerWidth - pillWidth) / 2;
+      top = 80;
     }
 
     // Keep within horizontal viewport bounds with 10px margin
@@ -1039,18 +1090,15 @@
     if (top + pillHeight > window.innerHeight - 10) {
       top = Math.max(10, window.innerHeight - pillHeight - 10);
     }
+    if (top < 10) top = 10;
 
     pillElement.style.top = `${Math.round(top)}px`;
     pillElement.style.left = `${Math.round(left)}px`;
     pillElement.classList.add('visible');
   }
 
-  // Register selection and action listeners
-  document.addEventListener('mouseup', handleMouseUp);
-  document.addEventListener('selectionchange', handleSelectionChange);
-
-  // Trigger pill on copy event (Ctrl+C, Cmd+C, or context-menu copy)
-  document.addEventListener('copy', () => {
+  // Handle copy event (Ctrl+C, Cmd+C, or context-menu copy)
+  function handleCopy(e) {
     if (!isContextValid()) return;
     setTimeout(() => {
       if (!isContextValid()) return;
@@ -1072,14 +1120,14 @@
       }
       if (text.length >= 2) {
         currentSelectedText = text;
-        showPillNearSelection(selection);
+        showPillNearSelection(selection, null);
         syncSelectionToSidePanel(text);
       }
     }, 25);
-  });
+  }
 
-  // Trigger pill on keyboard text selection (Shift + Arrows, Ctrl+A)
-  document.addEventListener('keyup', (e) => {
+  // Handle keyboard selection (Shift + Arrows, Ctrl+A)
+  function handleKeyUp(e) {
     if (!isContextValid()) return;
     if (e.shiftKey || ((e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A'))) {
       setTimeout(() => {
@@ -1089,22 +1137,38 @@
         const text = selection ? selection.toString().trim() : '';
         if (text.length >= 2 && !isSelectionInInput(selection)) {
           currentSelectedText = text;
-          showPillNearSelection(selection);
+          showPillNearSelection(selection, null);
           syncSelectionToSidePanel(text);
         }
       }, 40);
     }
-  });
+  }
 
-  // Close when clicking outside or pressing Escape
-  document.addEventListener('mousedown', (e) => {
+  // Handle mousedown outside to dismiss pill
+  function handleMouseDown(e) {
     const isInsideHost = e.composedPath
       ? (hostElement && e.composedPath().includes(hostElement))
       : (e.target === hostElement || (hostElement && hostElement.contains(e.target)));
     if (!isInsideHost) {
       hidePill();
     }
-  });
+  }
+
+  // Register listeners with CAPTURE phase (true)
+  // Guarantees listeners fire even on YouTube, Twitter/X, Google, etc. where frameworks call stopPropagation()
+  window.addEventListener('mouseup', handleMouseUp, true);
+  document.addEventListener('mouseup', handleMouseUp, true);
+
+  window.addEventListener('mousedown', handleMouseDown, true);
+  document.addEventListener('mousedown', handleMouseDown, true);
+
+  window.addEventListener('copy', handleCopy, true);
+  document.addEventListener('copy', handleCopy, true);
+
+  window.addEventListener('keyup', handleKeyUp, true);
+  document.addEventListener('keyup', handleKeyUp, true);
+
+  document.addEventListener('selectionchange', handleSelectionChange);
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
