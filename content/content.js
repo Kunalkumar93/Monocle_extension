@@ -4,6 +4,7 @@
   if (window.__monocleInitialized || window.__omniAiInitialized) return;
   window.__monocleInitialized = true;
   window.__omniAiInitialized = true;
+  console.log('[Monocle] In-Page Reading Companion active');
 
   // Ignore tiny/hidden iframes (e.g. ads, tracking pixels, 0x0 frames)
   if (window.top !== window.self && (window.innerWidth < 150 || window.innerHeight < 150)) {
@@ -119,27 +120,36 @@
       return true;
     }
 
-    const oldHost = document.getElementById('monocle-companion-root') || document.getElementById('omni-ai-companion-root');
-    if (oldHost) {
-      try { oldHost.remove(); } catch (e) {}
+    let host = document.getElementById('monocle-companion-root') || document.getElementById('omni-ai-companion-root');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'monocle-companion-root';
+      host.style.cssText = 'position: fixed !important; top: 0 !important; left: 0 !important; width: 0 !important; height: 0 !important; z-index: 2147483647 !important; border: none !important; margin: 0 !important; padding: 0 !important;';
+      const parent = document.body || document.documentElement;
+      if (!parent) return false;
+      parent.appendChild(host);
     }
+    hostElement = host;
 
-    hostElement = document.createElement('div');
-    hostElement.id = 'monocle-companion-root';
-    hostElement.style.cssText = 'all: initial !important; position: fixed !important; top: 0 !important; left: 0 !important; width: 0 !important; height: 0 !important; z-index: 2147483647 !important; border: none !important; margin: 0 !important; padding: 0 !important; pointer-events: none !important;';
-
-    const parent = document.body || document.documentElement;
-    if (!parent) return false;
-    parent.appendChild(hostElement);
-
-    try {
-      shadowRoot = hostElement.attachShadow({ mode: 'open' });
-      injectStyles();
-      createElements();
+    if (!hostElement.shadowRoot) {
+      try {
+        shadowRoot = hostElement.attachShadow({ mode: 'open' });
+        injectStyles();
+        createElements();
+        return true;
+      } catch (err) {
+        console.warn('[Monocle] shadowRoot attach error:', err);
+        return false;
+      }
+    } else {
+      shadowRoot = hostElement.shadowRoot;
+      pillElement = shadowRoot.querySelector('.omni-floating-pill');
+      popoverElement = shadowRoot.querySelector('.omni-popover');
+      if (!pillElement || !popoverElement) {
+        injectStyles();
+        createElements();
+      }
       return true;
-    } catch (err) {
-      console.warn('Monocle shadowRoot attach warning:', err);
-      return false;
     }
   }
 
@@ -487,69 +497,142 @@
     shadowRoot.appendChild(coreStyle);
   }
 
-  // Create UI Elements inside Shadow DOM
+  // Create UI Elements inside Shadow DOM using 100% native DOM APIs (zero Trusted Types or CSP issues)
   function createElements() {
     // 1. Floating Pill
     pillElement = document.createElement('div');
     pillElement.className = 'omni-floating-pill';
-    setElementHTML(pillElement, `
-      <div class="omni-pill-brand" title="Monocle Companion">
-        <div class="omni-pill-icon">🧐</div>
-        <span class="omni-pill-title">Monocle</span>
-      </div>
-      <button class="omni-btn omni-btn-primary" id="omni-quick-explain-btn" title="Get fast explanation">
-        <span class="omni-btn-icon">⚡</span> Explain
-      </button>
-      <button class="omni-btn omni-btn-translate" id="omni-translate-btn" title="Translate & explain vocabulary">
-        <span class="omni-btn-icon">🌐</span> Translate
-      </button>
-      <button class="omni-btn" id="omni-open-panel-btn" title="Open in docked Side Panel">
-        <span class="omni-btn-icon">💬</span> Side Panel
-      </button>
-      <button class="omni-btn" id="omni-summarize-btn" title="Summarize in bullets">
-        <span class="omni-btn-icon">📋</span> Summary
-      </button>
-    `);
+
+    const brandDiv = document.createElement('div');
+    brandDiv.className = 'omni-pill-brand';
+    brandDiv.title = 'Monocle Companion';
+    const brandIcon = document.createElement('div');
+    brandIcon.className = 'omni-pill-icon';
+    brandIcon.textContent = '🧐';
+    const brandTitle = document.createElement('span');
+    brandTitle.className = 'omni-pill-title';
+    brandTitle.textContent = 'Monocle';
+    brandDiv.appendChild(brandIcon);
+    brandDiv.appendChild(brandTitle);
+    pillElement.appendChild(brandDiv);
+
+    function createPillBtn(id, className, icon, label, title) {
+      const btn = document.createElement('button');
+      btn.id = id;
+      btn.className = className;
+      btn.title = title;
+      const iconSpan = document.createElement('span');
+      iconSpan.className = 'omni-btn-icon';
+      iconSpan.textContent = icon;
+      btn.appendChild(iconSpan);
+      btn.appendChild(document.createTextNode(' ' + label));
+      return btn;
+    }
+
+    pillElement.appendChild(createPillBtn('omni-quick-explain-btn', 'omni-btn omni-btn-primary', '⚡', 'Explain', 'Get fast explanation'));
+    pillElement.appendChild(createPillBtn('omni-translate-btn', 'omni-btn omni-btn-translate', '🌐', 'Translate', 'Translate & explain vocabulary'));
+    pillElement.appendChild(createPillBtn('omni-open-panel-btn', 'omni-btn', '💬', 'Side Panel', 'Open in docked Side Panel'));
+    pillElement.appendChild(createPillBtn('omni-summarize-btn', 'omni-btn', '📋', 'Summary', 'Summarize in bullets'));
+
     shadowRoot.appendChild(pillElement);
 
     // 2. Popover Card
     popoverElement = document.createElement('div');
     popoverElement.className = 'omni-popover';
-    setElementHTML(popoverElement, `
-      <div class="omni-popover-header">
-        <div class="omni-popover-header-left" style="display: flex; align-items: center; gap: 6px;">
-          <span style="font-size: 15px;">🧐</span>
-          <span id="omni-popover-title">Monocle Quick Insight</span>
-        </div>
-        <div class="omni-popover-actions">
-          <select class="omni-lang-badge" id="omni-popover-lang-select" title="Target Language">
-            <option value="English">EN</option>
-            <option value="Spanish">ES</option>
-            <option value="French">FR</option>
-            <option value="German">DE</option>
-            <option value="Chinese (Simplified)">ZH</option>
-            <option value="Japanese">JA</option>
-            <option value="Korean">KO</option>
-            <option value="Hindi">HI</option>
-            <option value="Portuguese">PT</option>
-            <option value="Italian">IT</option>
-            <option value="Russian">RU</option>
-            <option value="Arabic">AR</option>
-          </select>
-          <button class="omni-icon-btn" id="omni-popover-copy-btn" title="Copy answer">📋</button>
-          <button class="omni-icon-btn" id="omni-popover-expand-btn" title="Expand into Side Panel">↗</button>
-          <button class="omni-icon-btn" id="omni-popover-close-btn" title="Close (Esc)">✕</button>
-        </div>
-      </div>
-      <div class="omni-popover-body" id="omni-popover-content">
-        <p><span class="omni-spinner"></span>Analyzing selected text...</p>
-      </div>
-      <div class="omni-popover-footer">
-        <input type="text" class="omni-quick-input" id="omni-followup-input" placeholder="Ask follow-up question (Enter)..." />
-        <button class="omni-btn omni-btn-primary" id="omni-followup-send-btn">Ask</button>
-      </div>
-      <div class="omni-toast" id="omni-toast">Copied to clipboard!</div>
-    `);
+
+    const header = document.createElement('div');
+    header.className = 'omni-popover-header';
+
+    const headerLeft = document.createElement('div');
+    headerLeft.className = 'omni-popover-header-left';
+    headerLeft.style.cssText = 'display: flex; align-items: center; gap: 6px;';
+    const hIcon = document.createElement('span');
+    hIcon.style.fontSize = '15px';
+    hIcon.textContent = '🧐';
+    const hTitle = document.createElement('span');
+    hTitle.id = 'omni-popover-title';
+    hTitle.textContent = 'Monocle Quick Insight';
+    headerLeft.appendChild(hIcon);
+    headerLeft.appendChild(hTitle);
+
+    const headerActions = document.createElement('div');
+    headerActions.className = 'omni-popover-actions';
+
+    const langSelect = document.createElement('select');
+    langSelect.className = 'omni-lang-badge';
+    langSelect.id = 'omni-popover-lang-select';
+    langSelect.title = 'Target Language';
+    const languages = [
+      ['English', 'EN'],
+      ['Spanish', 'ES'],
+      ['French', 'FR'],
+      ['German', 'DE'],
+      ['Chinese (Simplified)', 'ZH'],
+      ['Japanese', 'JA'],
+      ['Korean', 'KO'],
+      ['Hindi', 'HI'],
+      ['Portuguese', 'PT'],
+      ['Italian', 'IT'],
+      ['Russian', 'RU'],
+      ['Arabic', 'AR']
+    ];
+    languages.forEach(([val, label]) => {
+      const opt = document.createElement('option');
+      opt.value = val;
+      opt.textContent = label;
+      langSelect.appendChild(opt);
+    });
+
+    function createIconBtn(id, icon, title) {
+      const btn = document.createElement('button');
+      btn.className = 'omni-icon-btn';
+      btn.id = id;
+      btn.title = title;
+      btn.textContent = icon;
+      return btn;
+    }
+
+    headerActions.appendChild(langSelect);
+    headerActions.appendChild(createIconBtn('omni-popover-copy-btn', '📋', 'Copy answer'));
+    headerActions.appendChild(createIconBtn('omni-popover-expand-btn', '↗', 'Expand into Side Panel'));
+    headerActions.appendChild(createIconBtn('omni-popover-close-btn', '✕', 'Close (Esc)'));
+
+    header.appendChild(headerLeft);
+    header.appendChild(headerActions);
+    popoverElement.appendChild(header);
+
+    const body = document.createElement('div');
+    body.className = 'omni-popover-body';
+    body.id = 'omni-popover-content';
+    const spinnerP = document.createElement('p');
+    const spinnerSpan = document.createElement('span');
+    spinnerSpan.className = 'omni-spinner';
+    spinnerP.appendChild(spinnerSpan);
+    spinnerP.appendChild(document.createTextNode('Analyzing selected text...'));
+    body.appendChild(spinnerP);
+    popoverElement.appendChild(body);
+
+    const footer = document.createElement('div');
+    footer.className = 'omni-popover-footer';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'omni-quick-input';
+    input.id = 'omni-followup-input';
+    input.placeholder = 'Ask follow-up question (Enter)...';
+    const askBtn = document.createElement('button');
+    askBtn.className = 'omni-btn omni-btn-primary';
+    askBtn.id = 'omni-followup-send-btn';
+    askBtn.textContent = 'Ask';
+    footer.appendChild(input);
+    footer.appendChild(askBtn);
+    popoverElement.appendChild(footer);
+
+    const toast = document.createElement('div');
+    toast.className = 'omni-toast';
+    toast.id = 'omni-toast';
+    toast.textContent = 'Copied to clipboard!';
+    popoverElement.appendChild(toast);
+
     shadowRoot.appendChild(popoverElement);
 
     bindEvents();
@@ -901,9 +984,9 @@
   // Check if selection is inside pure input fields (exclude search/password inputs from popup clutter)
   function isSelectionInInput(selection) {
     if (!selection || !selection.anchorNode) return false;
-    const parent = selection.anchorNode.nodeType === Node.ELEMENT_NODE
+    const parent = selection.anchorNode.nodeType === 1
       ? selection.anchorNode
-      : selection.anchorNode.parentElement;
+      : (selection.anchorNode.parentElement || selection.anchorNode.parentNode);
     if (!parent) return false;
     if (parent.tagName === 'INPUT' || parent.tagName === 'TEXTAREA') return true;
     if (parent.closest && parent.closest('input, textarea')) return true;
@@ -919,6 +1002,10 @@
     if (selection && selection.rangeCount > 0) {
       const range = selection.getRangeAt(0);
       rect = range.getBoundingClientRect();
+      if ((!rect || (rect.width === 0 && rect.height === 0)) && range.getClientRects) {
+        const clientRects = range.getClientRects();
+        if (clientRects.length > 0) rect = clientRects[0];
+      }
     }
 
     // Fallback if selection is inside an input/textarea or has 0 dimensions
@@ -931,7 +1018,7 @@
 
     if (!rect || (rect.width === 0 && rect.height === 0)) return;
 
-    const pillWidth = pillElement.offsetWidth || 380;
+    const pillWidth = pillElement.offsetWidth || 440;
     const pillHeight = pillElement.offsetHeight || 38;
 
     // Viewport-relative coordinates (no window.scrollY/X because pill is position: fixed)
@@ -1008,11 +1095,6 @@
       }, 40);
     }
   });
-
-  // Hide pill during scroll so it doesn't float disconnectedly
-  window.addEventListener('scroll', () => {
-    hidePill();
-  }, { passive: true });
 
   // Close when clicking outside or pressing Escape
   document.addEventListener('mousedown', (e) => {
