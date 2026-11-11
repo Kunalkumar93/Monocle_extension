@@ -46,6 +46,18 @@
       </button>
     </nav>
 
+    <!-- File Access Banner (shown when viewing a file:/// URL without permission) -->
+    <div class="file-access-banner" id="file-access-banner" style="display: none;">
+      <div class="file-banner-content">
+        <span class="file-banner-icon">📁</span>
+        <div class="file-banner-text">
+          <div class="file-banner-heading">Downloaded / Local Document</div>
+          <div class="file-banner-desc">Enable "Allow access to file URLs" in Chrome to unlock in-page companion on local files.</div>
+        </div>
+        <button class="btn-file-settings" id="btn-open-file-settings">Enable ↗</button>
+      </div>
+    </div>
+
     <!-- Page Intelligence Action Bar -->
     <div class="page-intel-bar" id="page-intel-bar">
       <div class="page-intel-left">
@@ -84,6 +96,7 @@
         <button class="chip-btn" data-prompt="Summarize this into 3 concise bullet points:">📋 Summarize</button>
         <button class="chip-btn" data-prompt="Give me a simple real-world analogy for this:">🎨 Analogy</button>
         <button class="chip-btn" data-prompt="What are the counterarguments or criticisms of this?">⚖️ Critique</button>
+        <button class="chip-btn chip-sync-clipboard" id="btn-sync-clipboard" title="Sync copied text from PDF or document (Ctrl+C)">📋 Sync Copied</button>
         <button class="chip-btn chip-copy" id="btn-copy-context">📋 Copy Context</button>
       </div>
     </div>

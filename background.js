@@ -48,25 +48,63 @@ chrome.commands.onCommand.addListener(async (command) => {
   }
 });
 
+// Helper: Clean tab title for documents, PDFs, and local files
+function getCleanTabTitle(tab) {
+  if (!tab) return 'Document';
+  if (tab.title && !tab.title.startsWith('file:///')) return tab.title;
+  if (tab.url) {
+    try {
+      const pathname = new URL(tab.url).pathname;
+      const filename = pathname.split('/').filter(Boolean).pop();
+      if (filename) return decodeURIComponent(filename);
+    } catch (e) {}
+  }
+  return tab.title || 'Document';
+}
+
 // Handle Context Menu clicks
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (!tab || !tab.id) return;
-  const selectedText = info.selectionText || '';
+  const selectedText = (info.selectionText || '').trim();
+  const cleanTitle = getCleanTabTitle(tab);
 
   if (info.menuItemId === 'monocle_explain_selection' || info.menuItemId === 'omni_explain_selection') {
-    chrome.tabs.sendMessage(tab.id, {
-      type: 'TRIGGER_QUICK_EXPLAIN',
-      text: selectedText
-    }).catch(() => {});
+    try {
+      await chrome.tabs.sendMessage(tab.id, {
+        type: 'TRIGGER_QUICK_EXPLAIN',
+        text: selectedText
+      });
+    } catch (err) {
+      // Content script is unreachable (e.g. Chrome native PDF viewer, local file without permission, or restricted tab)
+      // Fallback: Open side panel and trigger explanation immediately
+      await saveContextAndOpenPanel(tab.id, selectedText, cleanTitle, tab.url);
+      setTimeout(() => {
+        safeBroadcast({
+          type: 'TRIGGER_EXPLAIN_IN_PANEL',
+          text: selectedText
+        });
+      }, 400);
+    }
   } else if (info.menuItemId === 'monocle_translate_selection') {
-    chrome.tabs.sendMessage(tab.id, {
-      type: 'TRIGGER_QUICK_TRANSLATE',
-      text: selectedText
-    }).catch(() => {});
+    try {
+      await chrome.tabs.sendMessage(tab.id, {
+        type: 'TRIGGER_QUICK_TRANSLATE',
+        text: selectedText
+      });
+    } catch (err) {
+      // Fallback: Open side panel and trigger translation immediately
+      await saveContextAndOpenPanel(tab.id, selectedText, cleanTitle, tab.url);
+      setTimeout(() => {
+        safeBroadcast({
+          type: 'TRIGGER_TRANSLATE_IN_PANEL',
+          text: selectedText
+        });
+      }, 400);
+    }
   } else if (info.menuItemId === 'monocle_send_to_sidepanel' || info.menuItemId === 'omni_send_to_sidepanel') {
-    await saveContextAndOpenPanel(tab.id, selectedText, tab.title, tab.url);
+    await saveContextAndOpenPanel(tab.id, selectedText, cleanTitle, tab.url);
   } else if (info.menuItemId === 'monocle_summarize_page' || info.menuItemId === 'omni_summarize_page') {
-    await saveContextAndOpenPanel(tab.id, '', tab.title, tab.url);
+    await saveContextAndOpenPanel(tab.id, selectedText, cleanTitle, tab.url);
     setTimeout(() => {
       safeBroadcast({ type: 'TRIGGER_PAGE_TLDR' });
     }, 400);
@@ -89,9 +127,18 @@ function safeBroadcast(message) {
 
 // Helper: Save context and open side panel
 async function saveContextAndOpenPanel(tabId, text, title, url) {
+  let cleanTitle = title || 'Web Page';
+  if (cleanTitle.startsWith('file:///') && url) {
+    try {
+      const pathname = new URL(url).pathname;
+      const filename = pathname.split('/').filter(Boolean).pop();
+      if (filename) cleanTitle = decodeURIComponent(filename);
+    } catch (e) {}
+  }
+
   const contextData = {
-    text: text.trim(),
-    title: title || 'Web Page',
+    text: (text || '').trim(),
+    title: cleanTitle,
     url: url || '',
     timestamp: Date.now()
   };
@@ -197,6 +244,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     testGeminiKey(message.key)
       .then((res) => sendResponse({ success: true, models: res.models, version: res.version }))
       .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  if (message.type === 'CHECK_FILE_ACCESS') {
+    chrome.extension.isAllowedFileSchemeAccess((isAllowed) => {
+      sendResponse({ isAllowed: !!isAllowed });
+    });
     return true;
   }
 

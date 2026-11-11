@@ -15,6 +15,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   const btnCopyContext = document.getElementById('btn-copy-context');
   const chipButtons = document.querySelectorAll('.chip-btn[data-prompt]');
   const btnPasteToWeb = document.getElementById('btn-paste-to-web');
+  const fileAccessBanner = document.getElementById('file-access-banner');
+  const btnOpenFileSettings = document.getElementById('btn-open-file-settings');
+  const btnSyncClipboard = document.getElementById('btn-sync-clipboard');
 
   // Page Intelligence Elements
   const pageTitleDisplay = document.getElementById('page-title-display');
@@ -177,11 +180,98 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
+  // Wire File Access Settings button
+  if (btnOpenFileSettings) {
+    btnOpenFileSettings.addEventListener('click', () => {
+      chrome.tabs.create({ url: `chrome://extensions/?id=${chrome.runtime.id}` });
+    });
+  }
+
+  // Wire Sync Copied Text button (reads system clipboard)
+  if (btnSyncClipboard) {
+    btnSyncClipboard.addEventListener('click', async () => {
+      try {
+        const clipText = await navigator.clipboard.readText();
+        if (clipText && clipText.trim()) {
+          const trimmed = clipText.trim();
+          updateContextDisplay(trimmed);
+          if (currentPageData && currentPageData.isPdf) {
+            currentPageData.text = trimmed;
+          }
+          chrome.storage.local.set({
+            currentContext: {
+              text: trimmed,
+              title: currentPageData?.title || 'Copied Document Text',
+              url: currentPageData?.url || '',
+              timestamp: Date.now()
+            }
+          });
+          showToast(`📋 Synced ${trimmed.length} characters from clipboard!`);
+        } else {
+          showToast('Clipboard is empty. Copy text from your document (Ctrl+C) first.');
+        }
+      } catch (err) {
+        console.warn('Clipboard read error:', err);
+        showToast('Could not read clipboard. Please paste directly into chat.');
+      }
+    });
+  }
+
   // Proactive sync with current active tab
   async function syncWithActiveTab() {
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (!tab || !tab.id) return;
+
+      // 0. Check File Scheme Access for local file:/// URLs
+      if (tab.url && tab.url.startsWith('file:///')) {
+        chrome.extension.isAllowedFileSchemeAccess((isAllowed) => {
+          if (fileAccessBanner) {
+            fileAccessBanner.style.display = isAllowed ? 'none' : 'block';
+          }
+        });
+      } else {
+        if (fileAccessBanner) {
+          fileAccessBanner.style.display = 'none';
+        }
+      }
+
+      // Check if current tab is a PDF document
+      const isPdf = tab.url && (
+        tab.url.toLowerCase().endsWith('.pdf') ||
+        tab.url.toLowerCase().includes('.pdf?') ||
+        tab.url.toLowerCase().includes('.pdf#') ||
+        (tab.title && tab.title.toLowerCase().endsWith('.pdf'))
+      );
+
+      if (isPdf) {
+        let docName = 'Downloaded PDF Document';
+        try {
+          const u = new URL(tab.url);
+          const parts = u.pathname.split('/').filter(Boolean);
+          if (parts.length > 0) {
+            docName = decodeURIComponent(parts[parts.length - 1]);
+          }
+        } catch (e) {
+          if (tab.title) docName = tab.title;
+        }
+
+        currentPageData = {
+          title: docName,
+          url: tab.url,
+          wordCount: 0,
+          readingTime: 1,
+          isPdf: true,
+          text: currentContextText || ''
+        };
+
+        const shortTitle = docName.length > 25 ? docName.slice(0, 24) + '...' : docName;
+        pageTitleDisplay.textContent = `📕 ${shortTitle}`;
+        pageTitleDisplay.title = `${docName} (Chrome Native PDF Viewer)`;
+        pageReadTime.textContent = '📕 PDF Document';
+        pageReadTime.style.display = 'inline-block';
+        return;
+      }
 
       // 1. Sync highlighted selection
       chrome.tabs.sendMessage(tab.id, { type: 'GET_SELECTION' }, (res) => {
@@ -259,7 +349,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!currentPageData || !currentPageData.text) {
       await syncWithActiveTab();
     }
+    if ((!currentPageData || !currentPageData.text) && currentContextText) {
+      if (!currentPageData) {
+        currentPageData = { title: 'Selected Excerpt', text: currentContextText };
+      } else {
+        currentPageData.text = currentContextText;
+      }
+    }
     if (!currentPageData || !currentPageData.text) {
+      if (currentPageData?.isPdf) {
+        showToast('Tip: In PDF, highlight text & right-click to Explain, or press Ctrl+C and click "Sync Copied"!');
+        return;
+      }
       showToast('Could not extract page text from this tab.');
       return;
     }
@@ -281,7 +382,18 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (!currentPageData || !currentPageData.text) {
         await syncWithActiveTab();
       }
+      if ((!currentPageData || !currentPageData.text) && currentContextText) {
+        if (!currentPageData) {
+          currentPageData = { title: 'Selected Excerpt', text: currentContextText };
+        } else {
+          currentPageData.text = currentContextText;
+        }
+      }
       if (!currentPageData || !currentPageData.text) {
+        if (currentPageData?.isPdf) {
+          showToast('Tip: In PDF, highlight text & right-click to Translate, or press Ctrl+C and click "Sync Copied"!');
+          return;
+        }
         showToast('Could not extract page text from this tab.');
         return;
       }
@@ -304,7 +416,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!currentPageData || !currentPageData.text) {
       await syncWithActiveTab();
     }
+    if ((!currentPageData || !currentPageData.text) && currentContextText) {
+      if (!currentPageData) {
+        currentPageData = { title: 'Selected Excerpt', text: currentContextText };
+      } else {
+        currentPageData.text = currentContextText;
+      }
+    }
     if (!currentPageData || !currentPageData.text) {
+      if (currentPageData?.isPdf) {
+        showToast('Tip: In PDF, highlight text & right-click to Outline, or press Ctrl+C and click "Sync Copied"!');
+        return;
+      }
       showToast('Could not extract page text from this tab.');
       return;
     }
@@ -325,7 +448,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!currentPageData || !currentPageData.text) {
       await syncWithActiveTab();
     }
+    if ((!currentPageData || !currentPageData.text) && currentContextText) {
+      if (!currentPageData) {
+        currentPageData = { title: 'Selected Excerpt', text: currentContextText, wordCount: currentContextText.split(/\s+/).length };
+      } else {
+        currentPageData.text = currentContextText;
+      }
+    }
     if (!currentPageData || !currentPageData.text) {
+      if (currentPageData?.isPdf) {
+        showToast('Tip: Copy text from your PDF (Ctrl+C) and click "Sync Copied" to chat with it!');
+        return;
+      }
       showToast('Could not extract page text from this tab.');
       return;
     }
@@ -727,6 +861,19 @@ document.addEventListener('DOMContentLoaded', async () => {
       setTimeout(() => {
         if (btnTldrPage) btnTldrPage.click();
       }, 350);
+    }
+    if (message.type === 'TRIGGER_EXPLAIN_IN_PANEL' && message.text) {
+      updateContextDisplay(message.text);
+      switchEngine('fast-ai');
+      const prompt = `Please provide a crystal-clear, structured explanation of the following excerpt.\n\nStructure your answer as:\n### 💡 Plain-English Summary\n1 to 2 clear, accessible sentences anyone can understand.\n\n### 🔍 Key Concepts & Takeaways\n• 2 to 3 bullet points breaking down what it means and how it works.\n\nExcerpt:\n"""\n${message.text}\n"""`;
+      sendMessage(prompt, false, `⚡ Quick Explanation of selected excerpt`);
+    }
+    if (message.type === 'TRIGGER_TRANSLATE_IN_PANEL' && message.text) {
+      updateContextDisplay(message.text);
+      switchEngine('fast-ai');
+      const targetLang = selectTargetLanguage ? selectTargetLanguage.value : 'English';
+      const prompt = `Please provide a high-precision translation of the following excerpt into ${targetLang}.\n\nStructure your response cleanly as:\n### 🌐 Translation (${targetLang})\n[Provide the fluent, natural translation here]\n\n### 🔍 Key Vocabulary & Nuance Notes\n• 2 to 3 notable terms or nuances explained in ${targetLang}.\n\nExcerpt:\n"""\n${message.text}\n"""`;
+      sendMessage(prompt, false, `🌐 Translation to ${targetLang}`, false, null, true);
     }
     if (message.type === 'SNIP_READY_FOR_CROP' && message.payload) {
       handleNewSnipPayload(message.payload);
