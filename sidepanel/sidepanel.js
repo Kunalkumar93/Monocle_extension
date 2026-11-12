@@ -18,6 +18,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const fileAccessBanner = document.getElementById('file-access-banner');
   const btnOpenFileSettings = document.getElementById('btn-open-file-settings');
   const btnSyncClipboard = document.getElementById('btn-sync-clipboard');
+  const btnChipCustom = document.getElementById('btn-chip-custom');
 
   // Page Intelligence Elements
   const pageTitleDisplay = document.getElementById('page-title-display');
@@ -171,13 +172,32 @@ document.addEventListener('DOMContentLoaded', async () => {
       contextSnippet.style.borderLeftColor = '#6366f1';
       contextBar.classList.add('has-selection');
       contextBar.style.display = 'flex';
+      if (chatInput) {
+        chatInput.placeholder = 'Ask custom prompt about selection (e.g. Write code for this)...';
+      }
     } else {
       contextSnippet.textContent = 'No text selected yet. Highlight any text in your article!';
       contextSnippet.style.color = '#9ca3af';
       contextSnippet.style.borderLeftColor = 'rgba(255,255,255,0.2)';
       contextBar.classList.remove('has-selection');
       contextBar.style.display = 'flex';
+      if (chatInput) {
+        chatInput.placeholder = 'Ask anything about the article... (Enter to send, Shift+Enter for newline)';
+      }
     }
+  }
+
+  // Wire Custom Prompt chip button
+  if (btnChipCustom) {
+    btnChipCustom.addEventListener('click', () => {
+      switchEngine('fast-ai');
+      if (chatInput) {
+        chatInput.focus();
+        chatInput.placeholder = 'Type custom prompt (e.g. "Write working Python code for this")...';
+        chatInput.classList.add('input-highlight-pulse');
+        setTimeout(() => chatInput.classList.remove('input-highlight-pulse'), 1500);
+      }
+    });
   }
 
   // Wire File Access Settings button
@@ -634,6 +654,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  function escapeHtml(str) {
+    if (!str) return '';
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   // 5. Native Fast AI Chat Logic
   function handleChatSubmit() {
     const text = chatInput.value.trim();
@@ -642,6 +672,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     if (currentCroppedBase64) {
       sendVisionRequest(text, text);
+    } else if (currentContextText) {
+      // Custom prompt with selected content in first go!
+      const userHtml = `
+        <div class="user-prompt-text">${escapeHtml(text)}</div>
+        <div class="user-context-quote" title="Referenced Selection">
+          <span class="context-quote-badge">📌 Selected Context</span>
+          <div class="context-quote-body">"${escapeHtml(currentContextText.slice(0, 180))}${currentContextText.length > 180 ? '...' : ''}"</div>
+        </div>
+      `;
+      sendMessage(text, false, userHtml);
     } else {
       sendMessage(text);
     }
@@ -875,8 +915,36 @@ document.addEventListener('DOMContentLoaded', async () => {
       const prompt = `Please provide a high-precision translation of the following excerpt into ${targetLang}.\n\nStructure your response cleanly as:\n### 🌐 Translation (${targetLang})\n[Provide the fluent, natural translation here]\n\n### 🔍 Key Vocabulary & Nuance Notes\n• 2 to 3 notable terms or nuances explained in ${targetLang}.\n\nExcerpt:\n"""\n${message.text}\n"""`;
       sendMessage(prompt, false, `🌐 Translation to ${targetLang}`, false, null, true);
     }
+    if (message.type === 'FOCUS_CUSTOM_PROMPT') {
+      if (message.text) updateContextDisplay(message.text);
+      switchEngine('fast-ai');
+      if (chatInput) {
+        chatInput.focus();
+        chatInput.placeholder = 'Type custom prompt for selection (e.g. "Write working Python code")...';
+        chatInput.classList.add('input-highlight-pulse');
+        setTimeout(() => chatInput.classList.remove('input-highlight-pulse'), 1500);
+      }
+    }
     if (message.type === 'SNIP_READY_FOR_CROP' && message.payload) {
       handleNewSnipPayload(message.payload);
+    }
+  });
+
+  // Code Copy Button Handler (Delegated for CSP safety)
+  chatMessages.addEventListener('click', (e) => {
+    const copyBtn = e.target.closest('.monocle-code-copy-btn');
+    if (copyBtn) {
+      e.stopPropagation();
+      const encoded = copyBtn.getAttribute('data-code');
+      const code = encoded ? decodeURIComponent(encoded) : (copyBtn.closest('.monocle-code-block')?.querySelector('code')?.innerText || '');
+      navigator.clipboard.writeText(code).then(() => {
+        copyBtn.textContent = '✓ Copied!';
+        copyBtn.style.color = '#34d399';
+        setTimeout(() => {
+          copyBtn.textContent = '📋 Copy';
+          copyBtn.style.color = '';
+        }, 2000);
+      });
     }
   });
 
@@ -892,23 +960,64 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // Simple Markdown Formatter
+  // Resilient Markdown & Code Block Formatter (Full formatting like official Gemini app)
   function renderMarkdown(md) {
     if (!md) return '';
-    let html = md
+
+    // 1. Extract fenced code blocks (handling open streaming blocks too)
+    const codeBlocks = [];
+    let text = md.replace(/```([a-zA-Z0-9_+-]*)\n?([\s\S]*?)(?:```|$)/g, (match, lang, code) => {
+      const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`;
+      codeBlocks.push({
+        lang: (lang || 'code').trim().toLowerCase(),
+        code: code
+      });
+      return placeholder;
+    });
+
+    // 2. Escape prose text
+    text = text
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/^### (.*$)/gim, '<h4 style="margin: 6px 0; color: #a5b4fc;">$1</h4>')
-      .replace(/^## (.*$)/gim, '<h3 style="margin: 8px 0; color: #c7d2fe;">$1</h3>')
+      .replace(/>/g, '&gt;');
+
+    // 3. Headings, bold, italics, inline code, and lists
+    text = text
+      .replace(/^#### (.*$)/gim, '<h5 style="margin: 6px 0 3px 0; color: #cbd5e1; font-weight: 600;">$1</h5>')
+      .replace(/^### (.*$)/gim, '<h4 style="margin: 8px 0 4px 0; color: #a5b4fc; font-weight: 700;">$1</h4>')
+      .replace(/^## (.*$)/gim, '<h3 style="margin: 10px 0 6px 0; color: #c7d2fe; font-weight: 700;">$1</h3>')
       .replace(/\*\*(.*?)\*\*/gim, '<strong>$1</strong>')
       .replace(/\*(.*?)\*/gim, '<em>$1</em>')
-      .replace(/`([^`]+)`/gim, '<code>$1</code>')
+      .replace(/`([^`]+)`/gim, '<code class="monocle-inline-code">$1</code>')
       .replace(/^\s*[-•*]\s+(.*$)/gim, '<li>$1</li>');
 
-    if (html.includes('<li>')) {
-      html = html.replace(/((?:<li>.*<\/li>\s*)+)/gim, '<ul>$1</ul>');
+    if (text.includes('<li>')) {
+      text = text.replace(/((?:<li>.*<\/li>\s*)+)/gim, '<ul style="margin: 6px 0; padding-left: 20px;">$1</ul>');
     }
-    return html.replace(/\n\n/g, '<p></p>');
+
+    text = text.replace(/\n\n/g, '<p style="margin: 6px 0;"></p>');
+    text = text.replace(/\n/g, '<br>');
+
+    // 4. Reinsert code blocks
+    codeBlocks.forEach((cb, idx) => {
+      const escapedCode = cb.code
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+
+      const blockHtml = `
+        <div class="monocle-code-block">
+          <div class="monocle-code-header">
+            <span class="monocle-code-lang">${cb.lang || 'code'}</span>
+            <button class="monocle-code-copy-btn" data-code="${encodeURIComponent(cb.code)}" type="button">📋 Copy</button>
+          </div>
+          <pre class="monocle-code-pre"><code class="language-${cb.lang || 'text'}">${escapedCode}</code></pre>
+        </div>
+      `.trim();
+
+      text = text.replace(`__CODE_BLOCK_${idx}__`, blockHtml);
+    });
+
+    return text;
   }
 });

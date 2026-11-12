@@ -261,6 +261,46 @@
         background: linear-gradient(135deg, #0369a1, #4f46e5);
         box-shadow: 0 0 12px rgba(14, 165, 233, 0.5);
       }
+      .omni-btn-custom {
+        background: linear-gradient(135deg, #7c3aed, #a855f7);
+        border: 1px solid rgba(192, 132, 252, 0.4);
+        color: #ffffff;
+      }
+      .omni-btn-custom:hover {
+        background: linear-gradient(135deg, #6d28d9, #9333ea);
+        box-shadow: 0 0 12px rgba(168, 85, 247, 0.5);
+      }
+      .omni-pill-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .omni-pill-custom-bar {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .omni-pill-custom-input {
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(168, 85, 247, 0.4);
+        border-radius: 9999px;
+        padding: 5px 12px;
+        font-size: 12px;
+        color: #ffffff;
+        outline: none;
+        width: 250px;
+        max-width: 60vw;
+        transition: all 0.15s ease;
+        font-family: inherit;
+      }
+      .omni-pill-custom-input:focus {
+        border-color: #c084fc;
+        background: rgba(255, 255, 255, 0.16);
+        box-shadow: 0 0 10px rgba(168, 85, 247, 0.35);
+      }
+      .omni-pill-custom-input::placeholder {
+        color: #9ca3af;
+      }
       .omni-lang-badge {
         background: rgba(255, 255, 255, 0.08);
         border: 1px solid rgba(255, 255, 255, 0.18);
@@ -500,6 +540,74 @@
         border-radius: 4px;
         letter-spacing: 0.3px;
       }
+      .monocle-code-block {
+        margin: 10px 0;
+        background: #0d1117;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 8px;
+        overflow: hidden;
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+        text-align: left;
+      }
+      .monocle-code-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 5px 10px;
+        background: rgba(255, 255, 255, 0.05);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        font-size: 11px;
+        color: #9ca3af;
+      }
+      .monocle-code-lang {
+        font-weight: 700;
+        text-transform: lowercase;
+        color: #a5b4fc;
+        letter-spacing: 0.5px;
+      }
+      .monocle-code-copy-btn {
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        color: #e5e7eb;
+        padding: 1px 7px;
+        border-radius: 4px;
+        font-size: 10.5px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+      .monocle-code-copy-btn:hover {
+        background: rgba(99, 102, 241, 0.3);
+        border-color: #818cf8;
+        color: #ffffff;
+      }
+      .monocle-code-pre {
+        margin: 0;
+        padding: 10px 12px;
+        overflow-x: auto;
+        font-size: 12px;
+        line-height: 1.5;
+        color: #e6edf3;
+        white-space: pre !important;
+        tab-size: 2;
+        background: transparent !important;
+      }
+      .monocle-code-pre code {
+        font-family: inherit;
+        background: transparent !important;
+        padding: 0 !important;
+        border: none !important;
+        color: inherit !important;
+        white-space: pre !important;
+      }
+      .monocle-inline-code {
+        background: rgba(255, 255, 255, 0.1);
+        padding: 1px 5px;
+        border-radius: 4px;
+        font-size: 11.5px;
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+        color: #fca5a5;
+      }
     `;
     shadowRoot.appendChild(coreStyle);
   }
@@ -536,10 +644,46 @@
       return btn;
     }
 
-    pillElement.appendChild(createPillBtn('omni-quick-explain-btn', 'omni-btn omni-btn-primary', '⚡', 'Explain', 'Get fast explanation'));
-    pillElement.appendChild(createPillBtn('omni-translate-btn', 'omni-btn omni-btn-translate', '🌐', 'Translate', 'Translate & explain vocabulary'));
-    pillElement.appendChild(createPillBtn('omni-open-panel-btn', 'omni-btn', '💬', 'Side Panel', 'Open in docked Side Panel'));
-    pillElement.appendChild(createPillBtn('omni-summarize-btn', 'omni-btn', '📋', 'Summary', 'Summarize in bullets'));
+    // Pill standard action buttons wrapper
+    const actionsWrapper = document.createElement('div');
+    actionsWrapper.className = 'omni-pill-actions';
+    actionsWrapper.id = 'omni-pill-actions';
+
+    actionsWrapper.appendChild(createPillBtn('omni-quick-explain-btn', 'omni-btn omni-btn-primary', '⚡', 'Explain', 'Get fast explanation'));
+    actionsWrapper.appendChild(createPillBtn('omni-custom-prompt-btn', 'omni-btn omni-btn-custom', '✨', 'Custom', 'Give custom prompt for this content in first go'));
+    actionsWrapper.appendChild(createPillBtn('omni-translate-btn', 'omni-btn omni-btn-translate', '🌐', 'Translate', 'Translate & explain vocabulary'));
+    actionsWrapper.appendChild(createPillBtn('omni-open-panel-btn', 'omni-btn', '💬', 'Side Panel', 'Open in docked Side Panel'));
+    actionsWrapper.appendChild(createPillBtn('omni-summarize-btn', 'omni-btn', '📋', 'Summary', 'Summarize in bullets'));
+    pillElement.appendChild(actionsWrapper);
+
+    // Pill custom prompt inline input bar (initially hidden)
+    const customBar = document.createElement('div');
+    customBar.className = 'omni-pill-custom-bar';
+    customBar.id = 'omni-pill-custom-bar';
+    customBar.style.display = 'none';
+
+    const customInput = document.createElement('input');
+    customInput.type = 'text';
+    customInput.className = 'omni-pill-custom-input';
+    customInput.id = 'omni-pill-custom-input';
+    customInput.placeholder = 'Type custom prompt (e.g. Write working code)...';
+
+    const customSendBtn = document.createElement('button');
+    customSendBtn.className = 'omni-btn omni-btn-custom';
+    customSendBtn.id = 'omni-pill-custom-send-btn';
+    customSendBtn.textContent = '➤';
+    customSendBtn.title = 'Run Prompt (Enter)';
+
+    const customCancelBtn = document.createElement('button');
+    customCancelBtn.className = 'omni-icon-btn';
+    customCancelBtn.id = 'omni-pill-custom-cancel-btn';
+    customCancelBtn.textContent = '✕';
+    customCancelBtn.title = 'Cancel';
+
+    customBar.appendChild(customInput);
+    customBar.appendChild(customSendBtn);
+    customBar.appendChild(customCancelBtn);
+    pillElement.appendChild(customBar);
 
     shadowRoot.appendChild(pillElement);
 
@@ -662,6 +806,87 @@
       openPopover('Explain this simply and concisely:');
     });
 
+    // Pill Custom Prompt Toggle & Handlers
+    const actionsWrapper = shadowRoot.getElementById('omni-pill-actions');
+    const customBar = shadowRoot.getElementById('omni-pill-custom-bar');
+    const customInput = shadowRoot.getElementById('omni-pill-custom-input');
+    const customSendBtn = shadowRoot.getElementById('omni-pill-custom-send-btn');
+    const customCancelBtn = shadowRoot.getElementById('omni-pill-custom-cancel-btn');
+
+    function showPillCustomMode() {
+      if (actionsWrapper) actionsWrapper.style.display = 'none';
+      if (customBar) customBar.style.display = 'flex';
+      if (customInput) {
+        customInput.value = '';
+        setTimeout(() => customInput.focus(), 30);
+      }
+    }
+
+    function hidePillCustomMode() {
+      if (customBar) customBar.style.display = 'none';
+      if (actionsWrapper) actionsWrapper.style.display = 'flex';
+    }
+
+    const customBtn = shadowRoot.getElementById('omni-custom-prompt-btn');
+    if (customBtn) {
+      customBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        showPillCustomMode();
+      });
+    }
+
+    const handleCustomPromptSubmit = () => {
+      const prompt = customInput.value.trim();
+      if (!prompt) return;
+      hidePillCustomMode();
+      openPopover(prompt);
+    };
+
+    if (customSendBtn) {
+      customSendBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        handleCustomPromptSubmit();
+      });
+    }
+
+    if (customInput) {
+      customInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          e.stopPropagation();
+          handleCustomPromptSubmit();
+        } else if (e.key === 'Escape') {
+          e.stopPropagation();
+          hidePillCustomMode();
+        }
+      });
+    }
+
+    if (customCancelBtn) {
+      customCancelBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        hidePillCustomMode();
+      });
+    }
+
+    // Code copy delegation inside shadowRoot (100% CSP and Trusted Types safe)
+    shadowRoot.addEventListener('click', (e) => {
+      const copyBtn = e.target.closest('.monocle-code-copy-btn');
+      if (copyBtn) {
+        e.stopPropagation();
+        const encoded = copyBtn.getAttribute('data-code');
+        const code = encoded ? decodeURIComponent(encoded) : (copyBtn.closest('.monocle-code-block')?.querySelector('code')?.innerText || '');
+        navigator.clipboard.writeText(code).then(() => {
+          copyBtn.textContent = '✓ Copied!';
+          copyBtn.style.color = '#34d399';
+          setTimeout(() => {
+            copyBtn.textContent = '📋 Copy';
+            copyBtn.style.color = '';
+          }, 2000);
+        });
+      }
+    });
+
     // Pill Translate Button
     shadowRoot.getElementById('omni-translate-btn').addEventListener('click', (e) => {
       e.stopPropagation();
@@ -750,7 +975,15 @@
 
     const titleEl = shadowRoot.getElementById('omni-popover-title');
     if (titleEl) {
-      titleEl.textContent = isTranslation ? '🌐 Monocle Translation' : '🧐 Monocle Quick Insight';
+      if (isTranslation) {
+        titleEl.textContent = '🌐 Monocle Translation';
+      } else if (promptPrefix && promptPrefix !== 'Explain this simply and concisely:') {
+        const shortPrompt = promptPrefix.length > 25 ? promptPrefix.slice(0, 24) + '...' : promptPrefix;
+        titleEl.textContent = `✨ ${shortPrompt}`;
+        titleEl.title = promptPrefix;
+      } else {
+        titleEl.textContent = '🧐 Monocle Quick Insight';
+      }
     }
 
     const langSelect = shadowRoot.getElementById('omni-popover-lang-select');
@@ -894,25 +1127,65 @@
     });
   }
 
-  // Simple Markdown Renderer
+  // Resilient Markdown & Code Block Formatter (Full formatting like official Gemini app)
   function renderMarkdown(md) {
     if (!md) return '';
-    let html = md
+
+    // 1. Extract fenced code blocks (handling open streaming blocks too)
+    const codeBlocks = [];
+    let text = md.replace(/```([a-zA-Z0-9_+-]*)\n?([\s\S]*?)(?:```|$)/g, (match, lang, code) => {
+      const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`;
+      codeBlocks.push({
+        lang: (lang || 'code').trim().toLowerCase(),
+        code: code
+      });
+      return placeholder;
+    });
+
+    // 2. Escape prose text
+    text = text
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/^### (.*$)/gim, '<h4 style="margin: 6px 0 4px 0; color: #a5b4fc;">$1</h4>')
-      .replace(/^## (.*$)/gim, '<h3 style="margin: 8px 0 6px 0; color: #c7d2fe;">$1</h3>')
+      .replace(/>/g, '&gt;');
+
+    // 3. Headings, bold, italics, inline code, and lists
+    text = text
+      .replace(/^#### (.*$)/gim, '<h5 style="margin: 6px 0 3px 0; color: #cbd5e1; font-weight: 600;">$1</h5>')
+      .replace(/^### (.*$)/gim, '<h4 style="margin: 8px 0 4px 0; color: #a5b4fc; font-weight: 700;">$1</h4>')
+      .replace(/^## (.*$)/gim, '<h3 style="margin: 10px 0 6px 0; color: #c7d2fe; font-weight: 700;">$1</h3>')
       .replace(/\*\*(.*?)\*\*/gim, '<strong>$1</strong>')
       .replace(/\*(.*?)\*/gim, '<em>$1</em>')
-      .replace(/`([^`]+)`/gim, '<code style="background: rgba(255,255,255,0.1); padding: 1px 4px; border-radius: 4px; font-size: 12px;">$1</code>')
+      .replace(/`([^`]+)`/gim, '<code class="monocle-inline-code">$1</code>')
       .replace(/^\s*[-•*]\s+(.*$)/gim, '<li>$1</li>');
 
-    // Wrap list items in <ul>
-    if (html.includes('<li>')) {
-      html = html.replace(/((?:<li>.*<\/li>\s*)+)/gim, '<ul>$1</ul>');
+    if (text.includes('<li>')) {
+      text = text.replace(/((?:<li>.*<\/li>\s*)+)/gim, '<ul style="margin: 6px 0; padding-left: 20px;">$1</ul>');
     }
-    return html.replace(/\n\n/g, '<p></p>');
+
+    text = text.replace(/\n\n/g, '<p style="margin: 6px 0;"></p>');
+    text = text.replace(/\n/g, '<br>');
+
+    // 4. Reinsert code blocks
+    codeBlocks.forEach((cb, idx) => {
+      const escapedCode = cb.code
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+
+      const blockHtml = `
+        <div class="monocle-code-block">
+          <div class="monocle-code-header">
+            <span class="monocle-code-lang">${cb.lang || 'code'}</span>
+            <button class="monocle-code-copy-btn" data-code="${encodeURIComponent(cb.code)}" type="button">📋 Copy</button>
+          </div>
+          <pre class="monocle-code-pre"><code class="language-${cb.lang || 'text'}">${escapedCode}</code></pre>
+        </div>
+      `.trim();
+
+      text = text.replace(`__CODE_BLOCK_${idx}__`, blockHtml);
+    });
+
+    return text;
   }
 
   // Send selected text to background worker to open side panel
@@ -933,7 +1206,13 @@
   }
 
   function hidePill() {
-    if (pillElement) pillElement.classList.remove('visible');
+    if (pillElement) {
+      pillElement.classList.remove('visible');
+      const actionsWrapper = shadowRoot?.getElementById('omni-pill-actions');
+      const customBar = shadowRoot?.getElementById('omni-pill-custom-bar');
+      if (customBar) customBar.style.display = 'none';
+      if (actionsWrapper) actionsWrapper.style.display = 'flex';
+    }
   }
 
   function hidePopover() {
@@ -1359,6 +1638,16 @@
           currentSelectedText = message.text || window.getSelection()?.toString() || '';
           if (currentSelectedText) {
             openPopover('Explain this clearly and concisely:');
+          }
+        }
+
+        if (message.type === 'OPEN_CUSTOM_PROMPT') {
+          currentSelectedText = message.text || window.getSelection()?.toString() || '';
+          if (currentSelectedText) {
+            const selection = window.getSelection();
+            showPillNearSelection(selection, null);
+            const customBtn = shadowRoot?.getElementById('omni-custom-prompt-btn');
+            if (customBtn) customBtn.click();
           }
         }
 

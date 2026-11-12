@@ -14,6 +14,12 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 
   chrome.contextMenus.create({
+    id: 'monocle_custom_prompt',
+    title: '✨ Monocle: Custom Prompt with Selection...',
+    contexts: ['selection']
+  });
+
+  chrome.contextMenus.create({
     id: 'monocle_translate_selection',
     title: '🌐 Monocle: Translate "%s"',
     contexts: ['selection']
@@ -81,6 +87,21 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       setTimeout(() => {
         safeBroadcast({
           type: 'TRIGGER_EXPLAIN_IN_PANEL',
+          text: selectedText
+        });
+      }, 400);
+    }
+  } else if (info.menuItemId === 'monocle_custom_prompt') {
+    try {
+      await chrome.tabs.sendMessage(tab.id, {
+        type: 'OPEN_CUSTOM_PROMPT',
+        text: selectedText
+      });
+    } catch (err) {
+      await saveContextAndOpenPanel(tab.id, selectedText, cleanTitle, tab.url);
+      setTimeout(() => {
+        safeBroadcast({
+          type: 'FOCUS_CUSTOM_PROMPT',
           text: selectedText
         });
       }, 400);
@@ -404,6 +425,25 @@ async function streamSimulatedFallback(text, prompt, onChunk, signal) {
   }
 }
 
+// Monocle Developer & Knowledge System Instruction
+const MONOCLE_SYSTEM_INSTRUCTION = {
+  parts: [{
+    text: `You are Monocle AI, an expert AI reading companion and senior software engineer powered by Google Gemini.
+Your mission is to provide direct, intelligent, high-value answers.
+
+CRITICAL INSTRUCTIONS FOR CODE & PROGRAMMING:
+1. When asked for code, programming solutions, implementations, or scripts: ALWAYS provide COMPLETE, fully working, production-ready code.
+2. NEVER give high-level hand-wavy text or placeholders like "// TODO: implement here", "// write your logic here", or "you can use library X". Write the actual working code!
+3. Format all code inside standard markdown fenced code blocks with the exact language identifier (e.g., \`\`\`python, \`\`\`javascript, \`\`\`typescript, \`\`\`html, \`\`\`css, \`\`\`bash, \`\`\`sql, etc.).
+4. Include clear comments explaining critical logic, proper error handling, and best practices.
+5. Provide a brief explanation before or after the code explaining how it works and how to run it.
+
+CRITICAL INSTRUCTIONS FOR GENERAL QUERIES:
+1. Be concise, structured, and insightful using clean markdown formatting (headings, bullet points, bold key terms).
+2. Directly fulfill the user's specific prompt and intent without unnecessary filler.`
+  }]
+};
+
 // Resilient SSE Stream Engine for Gemini with dynamic fallback
 async function streamGeminiContents(apiKey, contentsPayload, preferredModel, onChunk, signal) {
   const cleanKey = apiKey.trim();
@@ -412,16 +452,22 @@ async function streamGeminiContents(apiKey, contentsPayload, preferredModel, onC
     const cleanName = modelName.replace(/^models\//, '');
     const url = `https://generativelanguage.googleapis.com/${apiVersion}/models/${cleanName}:streamGenerateContent?alt=sse&key=${cleanKey}`;
 
+    const requestBody = {
+      contents: contentsPayload,
+      generationConfig: {
+        temperature: 0.3,
+        maxOutputTokens: 8192
+      }
+    };
+
+    if (apiVersion === 'v1beta') {
+      requestBody.systemInstruction = MONOCLE_SYSTEM_INSTRUCTION;
+    }
+
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: contentsPayload,
-        generationConfig: {
-          temperature: 0.25,
-          maxOutputTokens: 1000
-        }
-      }),
+      body: JSON.stringify(requestBody),
       signal
     });
 
@@ -716,16 +762,22 @@ async function callGeminiApi(apiKey, fullPrompt, preferredModel) {
     const cleanName = modelName.replace(/^models\//, '');
     const url = `https://generativelanguage.googleapis.com/${apiVersion}/models/${cleanName}:generateContent?key=${cleanKey}`;
     
+    const requestBody = {
+      contents: [{ parts: [{ text: fullPrompt }] }],
+      generationConfig: {
+        temperature: 0.3,
+        maxOutputTokens: 8192
+      }
+    };
+
+    if (apiVersion === 'v1beta') {
+      requestBody.systemInstruction = MONOCLE_SYSTEM_INSTRUCTION;
+    }
+
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: fullPrompt }] }],
-        generationConfig: {
-          temperature: 0.3,
-          maxOutputTokens: 700
-        }
-      })
+      body: JSON.stringify(requestBody)
     });
 
     const data = await res.json();
@@ -847,11 +899,20 @@ async function callGeminiApi(apiKey, fullPrompt, preferredModel) {
 
 // Fallback intelligent parser when user hasn't added an API key yet
 function generateQuickSmartAnalysis(text, prompt) {
-  const wordCount = text.trim().split(/\s+/).length;
+  const wordCount = (text || '').trim().split(/\s+/).filter(Boolean).length;
   const isTranslation = prompt && prompt.toLowerCase().includes('translat');
-  const sentences = text.split(/(?<=[.?!])\s+/).filter(s => s.trim().length > 0);
-  
-  let keyIdea = sentences[0] || text.slice(0, 120);
+  const isCodeRequest = prompt && /(code|script|function|program|python|javascript|typescript|java|c\+\+|html|css|sql|rust|go|react|vue|implement|algorithm)/i.test(prompt);
+
+  if (isCodeRequest) {
+    return `### 💻 Free Gemini API Key Required for Code Generation:\n\n` +
+      `You asked for working code: **"${prompt}"**.\n\n` +
+      `• Monocle generates full, production-ready code with the Google Gemini API. To enable this, add your **100% Free Gemini API key** in **⚙️ Settings** (top-right of the Side Panel).\n` +
+      `• Get your free key instantly with no credit card at [Google AI Studio](https://aistudio.google.com/app/apikey).\n` +
+      `• Alternatively, switch to **ChatGPT / Claude / Gemini Web** in the Side Panel tabs to generate code right now without a key!`;
+  }
+
+  const sentences = (text || '').split(/(?<=[.?!])\s+/).filter(s => s.trim().length > 0);
+  let keyIdea = sentences[0] || (text || '').slice(0, 120);
   if (keyIdea.length > 150) keyIdea = keyIdea.slice(0, 145) + '...';
 
   if (isTranslation) {
@@ -864,5 +925,5 @@ function generateQuickSmartAnalysis(text, prompt) {
   return `### 💡 Quick Breakdown:\n\n` +
     `• **Core Idea:** ${keyIdea}\n` +
     `• **Context:** Selection of ~${wordCount} words from the current page.\n` +
-    `• **Action:** For deep live answers, open **ChatGPT / Claude** in the side panel or add your **100% Free Gemini API key** in Monocle settings!`;
+    `• **Action:** For deep live answers and code generation, open **ChatGPT / Claude** in the side panel or add your **100% Free Gemini API key** in Monocle settings!`;
 }
