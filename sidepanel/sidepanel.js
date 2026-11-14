@@ -19,6 +19,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   const btnOpenFileSettings = document.getElementById('btn-open-file-settings');
   const btnSyncClipboard = document.getElementById('btn-sync-clipboard');
   const btnChipCustom = document.getElementById('btn-chip-custom');
+  const contextCustomPromptBox = document.getElementById('context-custom-prompt-box');
+  const customPromptInput = document.getElementById('custom-prompt-input');
+  const btnCustomPromptSubmit = document.getElementById('btn-custom-prompt-submit');
+  const btnCustomPromptClose = document.getElementById('btn-custom-prompt-close');
+  const promptHintModelName = document.getElementById('prompt-hint-model-name');
 
   // Page Intelligence Elements
   const pageTitleDisplay = document.getElementById('page-title-display');
@@ -43,7 +48,19 @@ document.addEventListener('DOMContentLoaded', async () => {
   const btnExplainDiagram = document.getElementById('btn-explain-diagram');
   const btnExplainFormula = document.getElementById('btn-explain-formula');
   const btnOcrText = document.getElementById('btn-ocr-text');
+  const snipActionsFastAi = document.getElementById('snip-actions-fast-ai');
+  const snipActionsWebApp = document.getElementById('snip-actions-web-app');
+  const snipHintBanner = document.getElementById('snip-hint-banner');
+  const snipHintAppName = document.getElementById('snip-hint-app-name');
+  const btnCopySnipImg = document.getElementById('btn-copy-snip-img');
+  const btnDownloadSnip = document.getElementById('btn-download-snip');
+  const btnCopyWebImg = document.getElementById('btn-copy-web-img');
+  const btnCopyImgPrompt = document.getElementById('btn-copy-img-prompt');
+  const btnSnipSwitchFast = document.getElementById('btn-snip-switch-fast');
+  const btnDownloadSnipWeb = document.getElementById('btn-download-snip-web');
+  const btnWebSnip = document.getElementById('btn-web-snip');
   let currentCroppedBase64 = null;
+  let currentCroppedBlob = null;
 
   // Header action elements
   const btnPopout = document.getElementById('btn-popout');
@@ -145,6 +162,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Update Badge
     currentEngineBadge.textContent = ENGINE_NAMES[engine] || 'AI';
+    if (promptHintModelName) {
+      promptHintModelName.textContent = ENGINE_NAMES[engine] || 'AI';
+    }
+
+    updateSnipActionBars();
 
     if (engine === 'fast-ai') {
       viewFastAi.classList.add('active');
@@ -187,15 +209,85 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
+  // Custom Prompt Box Controllers
+  function showContextCustomPromptBox() {
+    if (!contextCustomPromptBox) return;
+    contextCustomPromptBox.style.display = 'block';
+    if (promptHintModelName) {
+      promptHintModelName.textContent = ENGINE_NAMES[activeEngine] || 'AI';
+    }
+    if (customPromptInput) {
+      customPromptInput.focus();
+      customPromptInput.select();
+    }
+  }
+
+  function hideContextCustomPromptBox() {
+    if (!contextCustomPromptBox) return;
+    contextCustomPromptBox.style.display = 'none';
+    if (customPromptInput) customPromptInput.value = '';
+  }
+
+  function handleContextCustomPromptSubmit() {
+    const customQuery = customPromptInput ? customPromptInput.value.trim() : '';
+    if (!customQuery) return;
+
+    if (activeEngine === 'fast-ai') {
+      hideContextCustomPromptBox();
+      const userHtml = `
+        <div class="user-prompt-text">${escapeHtml(customQuery)}</div>
+        <div class="user-context-quote" title="Referenced Selection">
+          <span class="context-quote-badge">📌 Selected Context</span>
+          <div class="context-quote-body">"${escapeHtml(currentContextText.slice(0, 180))}${currentContextText.length > 180 ? '...' : ''}"</div>
+        </div>
+      `;
+      sendMessage(customQuery, false, userHtml);
+    } else {
+      const formatted = currentContextText
+        ? `${customQuery}\n\nContext excerpt:\n"""\n${currentContextText}\n"""`
+        : customQuery;
+
+      navigator.clipboard.writeText(formatted).then(() => {
+        showToast(`📋 Prompt & context copied! Press Ctrl+V in ${ENGINE_NAMES[activeEngine]}.`);
+        hideContextCustomPromptBox();
+      }).catch(() => {
+        showToast('Could not copy to clipboard.');
+      });
+    }
+  }
+
   // Wire Custom Prompt chip button
   if (btnChipCustom) {
     btnChipCustom.addEventListener('click', () => {
-      switchEngine('fast-ai');
-      if (chatInput) {
-        chatInput.focus();
-        chatInput.placeholder = 'Type custom prompt (e.g. "Write working Python code for this")...';
-        chatInput.classList.add('input-highlight-pulse');
-        setTimeout(() => chatInput.classList.remove('input-highlight-pulse'), 1500);
+      if (activeEngine === 'fast-ai') {
+        if (chatInput) {
+          chatInput.focus();
+          chatInput.placeholder = 'Type custom prompt (e.g. "Write working Python code for this")...';
+          chatInput.classList.add('input-highlight-pulse');
+          setTimeout(() => chatInput.classList.remove('input-highlight-pulse'), 1500);
+        }
+      } else {
+        showContextCustomPromptBox();
+      }
+    });
+  }
+
+  if (btnCustomPromptSubmit) {
+    btnCustomPromptSubmit.addEventListener('click', handleContextCustomPromptSubmit);
+  }
+
+  if (btnCustomPromptClose) {
+    btnCustomPromptClose.addEventListener('click', hideContextCustomPromptBox);
+  }
+
+  if (customPromptInput) {
+    customPromptInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleContextCustomPromptSubmit();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        hideContextCustomPromptBox();
       }
     });
   }
@@ -565,7 +657,10 @@ document.addEventListener('DOMContentLoaded', async () => {
           canvas.height = Math.max(1, cropH);
           const ctx = canvas.getContext('2d');
           ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
-          resolve(canvas.toDataURL('image/png'));
+          const croppedDataUrl = canvas.toDataURL('image/png');
+          canvas.toBlob((blob) => {
+            resolve({ dataUrl: croppedDataUrl, blob: blob });
+          }, 'image/png');
         } catch (err) {
           reject(err);
         }
@@ -575,15 +670,66 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  async function copyImageBlobToClipboard(blob) {
+    if (!blob) return false;
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({ 'image/png': blob })
+      ]);
+      return true;
+    } catch (err) {
+      console.warn('Direct ClipboardItem write failed:', err);
+      return false;
+    }
+  }
+
+  function downloadCroppedImage(dataUrl) {
+    if (!dataUrl) return;
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = `monocle-snip-${Date.now()}.png`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    showToast('💾 Image saved as PNG!');
+  }
+
+  function updateSnipActionBars() {
+    const modelName = ENGINE_NAMES[activeEngine] || 'Web Model';
+    if (activeEngine === 'fast-ai') {
+      if (snipActionsFastAi) snipActionsFastAi.style.display = 'flex';
+      if (snipActionsWebApp) snipActionsWebApp.style.display = 'none';
+      if (snipHintBanner) snipHintBanner.style.display = 'none';
+    } else {
+      if (snipActionsFastAi) snipActionsFastAi.style.display = 'none';
+      if (snipActionsWebApp) snipActionsWebApp.style.display = 'flex';
+      if (snipHintBanner) snipHintBanner.style.display = 'block';
+      if (snipHintAppName) snipHintAppName.textContent = modelName;
+      const webLabel = snipActionsWebApp ? snipActionsWebApp.querySelector('.active-engine-label') : null;
+      if (webLabel) webLabel.textContent = modelName;
+    }
+  }
+
   async function handleNewSnipPayload(payload) {
     if (!payload || !payload.dataUrl || !payload.area) return;
     try {
-      const croppedUrl = await cropScreenshot(payload.dataUrl, payload.area);
-      currentCroppedBase64 = croppedUrl;
-      if (snipPreviewImg) snipPreviewImg.src = croppedUrl;
+      const cropResult = await cropScreenshot(payload.dataUrl, payload.area);
+      currentCroppedBase64 = cropResult.dataUrl;
+      currentCroppedBlob = cropResult.blob;
+      if (snipPreviewImg) snipPreviewImg.src = currentCroppedBase64;
       if (snipPreviewContainer) snipPreviewContainer.style.display = 'flex';
-      switchEngine('fast-ai');
-      showToast('📸 Visual area captured! Pick an action below or ask a question.');
+      updateSnipActionBars();
+
+      // Automatically copy PNG blob to clipboard so user can immediately paste into ChatGPT/Claude
+      if (currentCroppedBlob) {
+        await copyImageBlobToClipboard(currentCroppedBlob);
+      }
+
+      if (activeEngine === 'fast-ai') {
+        showToast('📸 Visual area captured! Pick an action below or ask in chat.');
+      } else {
+        showToast(`📸 Snip copied to clipboard! Press Ctrl+V in ${ENGINE_NAMES[activeEngine]} to attach.`);
+      }
     } catch (e) {
       console.error('Failed to crop snip screenshot:', e);
     }
@@ -591,9 +737,77 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function dismissCurrentSnip() {
     currentCroppedBase64 = null;
+    currentCroppedBlob = null;
     if (snipPreviewImg) snipPreviewImg.src = '';
     if (snipPreviewContainer) snipPreviewContainer.style.display = 'none';
     chrome.storage.local.remove('lastSnipPayload');
+  }
+
+  if (btnCopySnipImg) {
+    btnCopySnipImg.addEventListener('click', async () => {
+      if (!currentCroppedBlob) {
+        showToast('No active snip image.');
+        return;
+      }
+      const ok = await copyImageBlobToClipboard(currentCroppedBlob);
+      if (ok) {
+        showToast('📋 Image copied to clipboard as PNG! (Ctrl+V to paste)');
+      } else {
+        showToast('Clipboard copy failed. Try saving PNG instead.');
+      }
+    });
+  }
+
+  if (btnDownloadSnip) {
+    btnDownloadSnip.addEventListener('click', () => {
+      downloadCroppedImage(currentCroppedBase64);
+    });
+  }
+
+  if (btnCopyWebImg) {
+    btnCopyWebImg.addEventListener('click', async () => {
+      if (!currentCroppedBlob) {
+        showToast('No active snip image.');
+        return;
+      }
+      const ok = await copyImageBlobToClipboard(currentCroppedBlob);
+      if (ok) {
+        showToast(`📋 Copied image! Click in ${ENGINE_NAMES[activeEngine]} & press Ctrl+V.`);
+      } else {
+        showToast('Clipboard copy failed. Try saving PNG instead.');
+      }
+    });
+  }
+
+  if (btnCopyImgPrompt) {
+    btnCopyImgPrompt.addEventListener('click', async () => {
+      if (!currentCroppedBlob) {
+        showToast('No active snip image.');
+        return;
+      }
+      await copyImageBlobToClipboard(currentCroppedBlob);
+      showToast(`📋 Image copied to clipboard! Press Ctrl+V in ${ENGINE_NAMES[activeEngine]} to attach.`);
+    });
+  }
+
+  if (btnSnipSwitchFast) {
+    btnSnipSwitchFast.addEventListener('click', () => {
+      switchEngine('fast-ai');
+      showToast('Switched to Fast Free AI with current snip.');
+    });
+  }
+
+  if (btnDownloadSnipWeb) {
+    btnDownloadSnipWeb.addEventListener('click', () => {
+      downloadCroppedImage(currentCroppedBase64);
+    });
+  }
+
+  if (btnWebSnip) {
+    btnWebSnip.addEventListener('click', () => {
+      chrome.runtime.sendMessage({ type: 'START_SNIP_REQUEST' });
+      showToast('Crosshair active: Click & drag to snip diagram or formula.');
+    });
   }
 
   if (btnSnipTool) {
@@ -917,12 +1131,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     if (message.type === 'FOCUS_CUSTOM_PROMPT') {
       if (message.text) updateContextDisplay(message.text);
-      switchEngine('fast-ai');
-      if (chatInput) {
-        chatInput.focus();
-        chatInput.placeholder = 'Type custom prompt for selection (e.g. "Write working Python code")...';
-        chatInput.classList.add('input-highlight-pulse');
-        setTimeout(() => chatInput.classList.remove('input-highlight-pulse'), 1500);
+      if (activeEngine === 'fast-ai') {
+        if (chatInput) {
+          chatInput.focus();
+          chatInput.placeholder = 'Type custom prompt for selection (e.g. "Write working Python code")...';
+          chatInput.classList.add('input-highlight-pulse');
+          setTimeout(() => chatInput.classList.remove('input-highlight-pulse'), 1500);
+        }
+      } else {
+        showContextCustomPromptBox();
       }
     }
     if (message.type === 'SNIP_READY_FOR_CROP' && message.payload) {

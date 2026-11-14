@@ -100,6 +100,50 @@
         <button class="chip-btn chip-sync-clipboard" id="btn-sync-clipboard" title="Sync copied text from PDF or document (Ctrl+C)">📋 Sync Copied</button>
         <button class="chip-btn chip-copy" id="btn-copy-context">📋 Copy Context</button>
       </div>
+
+      <!-- Inline Custom Prompt Box (Available across all models: Fast AI, ChatGPT, Claude, etc.) -->
+      <div class="context-custom-prompt-box" id="context-custom-prompt-box" style="display: none;">
+        <div class="custom-prompt-row">
+          <input type="text" class="custom-prompt-input" id="custom-prompt-input" placeholder="Type custom prompt for selected content..." />
+          <button class="btn-prompt-send" id="btn-custom-prompt-submit" title="Run / Copy Prompt">➤</button>
+          <button class="btn-prompt-close" id="btn-custom-prompt-close" title="Cancel">✕</button>
+        </div>
+        <div class="custom-prompt-hint" id="custom-prompt-hint">
+          <span>💡 Press <strong>Enter</strong> to format & copy for <strong id="prompt-hint-model-name">ChatGPT</strong> (then press <strong>Ctrl+V</strong> into chat).</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Global Snip Preview Card (Visible across all tabs: Fast AI, ChatGPT, Claude, Gemini, Perplexity) -->
+    <div class="snip-preview-container" id="snip-preview-container" style="display: none;">
+      <div class="snip-preview-header">
+        <div class="snip-header-left">
+          <span class="snip-preview-title">📸 Snipped Visual Area</span>
+          <span class="snip-clipboard-badge" id="snip-clipboard-badge">✓ Ready to Paste (Ctrl+V)</span>
+        </div>
+        <button class="snip-preview-dismiss" id="btn-dismiss-snip" title="Dismiss snip">✕</button>
+      </div>
+      <div class="snip-preview-body">
+        <img id="snip-preview-img" src="" alt="Snipped diagram" />
+      </div>
+      <!-- Actions when in Fast Free AI tab -->
+      <div class="snip-action-chips" id="snip-actions-fast-ai">
+        <button class="chip-btn chip-vision" id="btn-explain-diagram">📊 Explain Diagram</button>
+        <button class="chip-btn chip-vision" id="btn-explain-formula">🧮 Explain Formula</button>
+        <button class="chip-btn chip-vision" id="btn-ocr-text">📝 Transcribe Text/Code</button>
+        <button class="chip-btn chip-copy-img" id="btn-copy-snip-img" title="Copy PNG image to clipboard">📋 Copy Image</button>
+        <button class="chip-btn chip-download-img" id="btn-download-snip" title="Save image to file">💾 Save PNG</button>
+      </div>
+      <!-- Actions when in ChatGPT / Claude / Gemini / Perplexity tabs -->
+      <div class="snip-action-chips" id="snip-actions-web-app" style="display: none;">
+        <button class="chip-btn chip-copy-img-glow" id="btn-copy-web-img">📋 Copy Image for <span class="active-engine-label">ChatGPT</span> (Ctrl+V)</button>
+        <button class="chip-btn chip-web-prompt" id="btn-copy-img-prompt">📋 Copy Image + Prompt</button>
+        <button class="chip-btn chip-switch-fast" id="btn-snip-switch-fast">⚡ Analyze in Fast AI</button>
+        <button class="chip-btn chip-download-img" id="btn-download-snip-web" title="Save image to file">💾 Save PNG</button>
+      </div>
+      <div class="snip-hint-banner" id="snip-hint-banner" style="display: none;">
+        <span>👉 Click inside <strong id="snip-hint-app-name">ChatGPT</strong> and press <strong>Ctrl + V</strong> to attach this image!</span>
+      </div>
     </div>
 
     <!-- Main Content Area -->
@@ -119,22 +163,6 @@
           </div>
         </div>
 
-        <!-- Snip Preview Card (shown when an image is snipped) -->
-        <div class="snip-preview-container" id="snip-preview-container" style="display: none;">
-          <div class="snip-preview-header">
-            <span class="snip-preview-title">📸 Snipped Visual Area</span>
-            <button class="snip-preview-dismiss" id="btn-dismiss-snip" title="Dismiss snip">✕</button>
-          </div>
-          <div class="snip-preview-body">
-            <img id="snip-preview-img" src="" alt="Snipped diagram" />
-          </div>
-          <div class="snip-action-chips">
-            <button class="chip-btn chip-vision" id="btn-explain-diagram">📊 Explain Diagram</button>
-            <button class="chip-btn chip-vision" id="btn-explain-formula">🧮 Explain Formula</button>
-            <button class="chip-btn chip-vision" id="btn-ocr-text">📝 Transcribe Text/Code</button>
-          </div>
-        </div>
-
         <!-- Chat Input Bar -->
         <div class="chat-input-wrapper">
           <textarea id="chat-input" placeholder="Ask anything about the article... (Enter to send, Shift+Enter for newline)" rows="1"></textarea>
@@ -148,6 +176,7 @@
       <section class="view-panel" id="view-web-app">
         <div class="web-toolbar">
           <span id="web-app-status">Loading web app...</span>
+          <button class="btn-sm btn-snip-accent" id="btn-web-snip" title="Snip diagram or formula from page (Alt+S)">📸 Snip</button>
           <button class="btn-sm" id="btn-paste-to-web">📋 Copy Current Context</button>
           <a id="btn-open-external" href="#" target="_blank" class="btn-sm">Open in Tab ↗</a>
         </div>

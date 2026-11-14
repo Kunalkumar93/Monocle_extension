@@ -10,7 +10,8 @@
     "scripting",
     "contextMenus",
     "declarativeNetRequest",
-    "clipboardRead"
+    "clipboardRead",
+    "clipboardWrite"
   ],
   "host_permissions": [
     "<all_urls>"
