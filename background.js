@@ -437,9 +437,47 @@ CRITICAL INSTRUCTIONS FOR GENERAL QUERIES:
   }]
 };
 
+// Helper: Normalize model names to avoid formatting issues
+function normalizeGeminiModelName(name) {
+  if (!name || name === 'auto') return 'auto';
+  let cleaned = name.trim().toLowerCase().replace(/^models\//, '');
+  if (cleaned.includes('3.8') && cleaned.includes('flash')) return 'gemini-3.8-flash';
+  if (cleaned.includes('3.8') && cleaned.includes('pro')) return 'gemini-3.8-pro';
+  if (cleaned.includes('3') && cleaned.includes('flash') && !cleaned.includes('2') && !cleaned.includes('1')) return 'gemini-3-flash';
+  if (cleaned.includes('2.5') && cleaned.includes('flash')) return 'gemini-2.5-flash';
+  if (cleaned.includes('2.0') && cleaned.includes('flash')) return 'gemini-2.0-flash';
+  if (cleaned.includes('1.5') && cleaned.includes('flash')) return 'gemini-1.5-flash';
+  cleaned = cleaned.replace(/\s+/g, '-');
+  return cleaned;
+}
+
+// Helper: Extract recommended replacement model from Google deprecation error string
+function extractRecommendedModel(errMessage) {
+  if (!errMessage) return null;
+  const match = errMessage.match(/use models\/([a-zA-Z0-9._-]+)/i) ||
+                errMessage.match(/models\/([a-zA-Z0-9._-]+).*?(?:recommended|latest)/i);
+  if (match && match[1]) {
+    return normalizeGeminiModelName(match[1]);
+  }
+  return null;
+}
+
+// Default prioritized candidate list for Google Gemini in 2026
+const DEFAULT_GEMINI_CANDIDATES = [
+  'gemini-3.8-flash',
+  'gemini-3-flash',
+  'gemini-2.5-flash',
+  'gemini-2.0-flash',
+  'gemini-1.5-flash'
+];
+
 // Helper: Classify fatal Google API errors (so we don't waste time retrying)
 function checkFatalGeminiError(status, errMessage) {
   const msg = (errMessage || '').toLowerCase();
+  // If Google says model is deprecated and recommends an upgrade, don't abort fatal: let self-healing upgrade it!
+  if (msg.includes('no longer available') || msg.includes('update your code to use') || msg.includes('not available')) {
+    return;
+  }
   if (status === 400 && (msg.includes('api_key_invalid') || msg.includes('key not valid') || msg.includes('api key'))) {
     throw new Error('Invalid Google Gemini API key. Please verify your key in Settings (⚙️).');
   }
@@ -454,7 +492,7 @@ function checkFatalGeminiError(status, errMessage) {
   }
 }
 
-// Fast, resilient SSE Stream Engine for Gemini with dynamic fallback
+// Fast, resilient SSE Stream Engine for Gemini with dynamic fallback & self-healing
 async function streamGeminiContents(apiKey, contentsPayload, preferredModel, onChunk, signal, fallbackPromptText = '') {
   const cleanKey = (apiKey || '').trim();
   if (!cleanKey) {
@@ -462,7 +500,7 @@ async function streamGeminiContents(apiKey, contentsPayload, preferredModel, onC
   }
 
   async function attemptStream(modelName) {
-    const cleanName = modelName.replace(/^models\//, '');
+    const cleanName = normalizeGeminiModelName(modelName);
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanName}:streamGenerateContent?alt=sse&key=${cleanKey}`;
 
     const requestBody = {
@@ -589,24 +627,26 @@ async function streamGeminiContents(apiKey, contentsPayload, preferredModel, onC
     throw new Error(`Empty response from ${cleanName}`);
   }
 
-  // Build high-speed candidates list (prioritizing 2.0-flash and 1.5-flash)
+  // Build candidate list prioritizing user preference, then working model, then gemini-3.8-flash
   const { workingGeminiModel } = await chrome.storage.local.get(['workingGeminiModel']);
 
+  const normPref = normalizeGeminiModelName(preferredModel);
+  const normWorking = normalizeGeminiModelName(workingGeminiModel);
+
   const candidateModels = [];
-  if (preferredModel && preferredModel !== 'auto') {
-    candidateModels.push(preferredModel);
+  if (normPref && normPref !== 'auto') {
+    candidateModels.push(normPref);
   }
-  if (workingGeminiModel && !candidateModels.includes(workingGeminiModel) && !workingGeminiModel.includes('2.5')) {
-    candidateModels.push(workingGeminiModel);
+  if (normWorking && normWorking !== 'auto' && !candidateModels.includes(normWorking)) {
+    candidateModels.push(normWorking);
   }
-  // Standard superfast models
-  ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-8b'].forEach(m => {
+  DEFAULT_GEMINI_CANDIDATES.forEach(m => {
     if (!candidateModels.includes(m)) candidateModels.push(m);
   });
 
-  // Try at most the top 2 candidate models via SSE stream
+  // Try candidate models with self-healing upgrade
   let lastError = null;
-  const modelsToAttempt = candidateModels.slice(0, 2);
+  const modelsToAttempt = candidateModels.slice(0, 3);
 
   for (const m of modelsToAttempt) {
     if (signal?.aborted) break;
@@ -618,6 +658,20 @@ async function streamGeminiContents(apiKey, contentsPayload, preferredModel, onC
       if (err.message && (err.message.includes('Invalid Google Gemini API key') || err.message.includes('rate limit reached') || err.message.includes('Permission denied'))) {
         throw err;
       }
+
+      // Self-healing: Check if Google provided a replacement model recommendation (e.g. models/gemini-3.8-flash)
+      const rec = extractRecommendedModel(err.message);
+      if (rec && rec !== m) {
+        console.log(`Self-healing: Auto-switching from ${m} to ${rec}`);
+        chrome.storage.local.set({ workingGeminiModel: rec, geminiModel: rec });
+        try {
+          await attemptStream(rec);
+          return true;
+        } catch (recErr) {
+          console.warn(`Recommended model ${rec} attempt failed:`, recErr.message);
+        }
+      }
+
       console.warn(`Streaming with ${m} failed: ${err.message}. Trying next candidate...`);
     }
   }
@@ -674,17 +728,20 @@ async function handleGeminiVision(prompt, base64Image) {
     }
   };
 
+  const normPref = normalizeGeminiModelName(geminiModel);
+  const normWorking = normalizeGeminiModelName(workingGeminiModel);
+
   const candidates = [];
-  if (geminiModel && geminiModel !== 'auto') candidates.push(geminiModel);
-  if (workingGeminiModel && !candidates.includes(workingGeminiModel) && !workingGeminiModel.includes('2.5')) candidates.push(workingGeminiModel);
-  ['gemini-2.0-flash', 'gemini-1.5-flash'].forEach(m => {
+  if (normPref && normPref !== 'auto') candidates.push(normPref);
+  if (normWorking && normWorking !== 'auto' && !candidates.includes(normWorking)) candidates.push(normWorking);
+  DEFAULT_GEMINI_CANDIDATES.forEach(m => {
     if (!candidates.includes(m)) candidates.push(m);
   });
 
   let lastError = null;
-  for (const model of candidates.slice(0, 2)) {
+  for (const model of candidates.slice(0, 3)) {
     try {
-      const cleanName = model.replace(/^models\//, '');
+      const cleanName = normalizeGeminiModelName(model);
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanName}:generateContent?key=${cleanKey}`;
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 12000);
@@ -700,6 +757,21 @@ async function handleGeminiVision(prompt, base64Image) {
       if (!res.ok) {
         const errMsg = (data && data.error && data.error.message) || `HTTP ${res.status}`;
         checkFatalGeminiError(res.status, errMsg);
+
+        // Self-healing check for vision
+        const rec = extractRecommendedModel(errMsg);
+        if (rec && rec !== cleanName) {
+          chrome.storage.local.set({ workingGeminiModel: rec, geminiModel: rec });
+          const retryRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${rec}:generateContent?key=${cleanKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          const retryData = await retryRes.json().catch(() => null);
+          if (retryData?.candidates?.[0]?.content?.parts?.[0]?.text) {
+            return retryData.candidates[0].content.parts[0].text;
+          }
+        }
         throw new Error(errMsg);
       }
 
@@ -727,6 +799,19 @@ async function testGeminiKey(apiKey) {
   const cleanKey = (apiKey || '').trim();
   if (!cleanKey) throw new Error('Please enter an API key.');
 
+  function rankModel(name) {
+    const l = name.toLowerCase();
+    if (l.includes('3.8-flash')) return 100;
+    if (l.includes('3.8')) return 95;
+    if (l.includes('3-flash')) return 90;
+    if (l.includes('3')) return 85;
+    if (l.includes('2.5-flash')) return 80;
+    if (l.includes('2.0-flash')) return 70;
+    if (l.includes('flash')) return 60;
+    if (l.includes('pro')) return 50;
+    return 10;
+  }
+
   for (const ver of ['v1beta', 'v1']) {
     try {
       const ctrl = new AbortController();
@@ -743,7 +828,8 @@ async function testGeminiKey(apiKey) {
         const genModels = data.models
           .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent'))
           .map(m => m.name.replace(/^models\//, ''))
-          .filter(name => !name.includes('embedding') && !name.includes('aqa') && !name.includes('imagen') && !name.includes('2.5'));
+          .filter(name => !name.includes('embedding') && !name.includes('aqa') && !name.includes('imagen'));
+        genModels.sort((a, b) => rankModel(b) - rankModel(a));
         return { models: genModels, version: ver };
       }
     } catch (e) {
@@ -797,7 +883,7 @@ async function callGeminiApi(apiKey, fullPrompt, preferredModel) {
   if (!cleanKey) throw new Error('Please enter an API key in Settings.');
 
   async function attemptGenerate(modelName) {
-    const cleanName = modelName.replace(/^models\//, '');
+    const cleanName = normalizeGeminiModelName(modelName);
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanName}:generateContent?key=${cleanKey}`;
 
     const requestBody = {
@@ -850,21 +936,34 @@ async function callGeminiApi(apiKey, fullPrompt, preferredModel) {
   }
 
   const { workingGeminiModel } = await chrome.storage.local.get(['workingGeminiModel']);
+
+  const normPref = normalizeGeminiModelName(preferredModel);
+  const normWorking = normalizeGeminiModelName(workingGeminiModel);
+
   const candidates = [];
-  if (preferredModel && preferredModel !== 'auto') candidates.push(preferredModel);
-  if (workingGeminiModel && !candidates.includes(workingGeminiModel) && !workingGeminiModel.includes('2.5')) candidates.push(workingGeminiModel);
-  ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-8b'].forEach(m => {
+  if (normPref && normPref !== 'auto') candidates.push(normPref);
+  if (normWorking && normWorking !== 'auto' && !candidates.includes(normWorking)) candidates.push(normWorking);
+  DEFAULT_GEMINI_CANDIDATES.forEach(m => {
     if (!candidates.includes(m)) candidates.push(m);
   });
 
   let lastError = null;
-  for (const m of candidates.slice(0, 2)) {
+  for (const m of candidates.slice(0, 3)) {
     try {
       return await attemptGenerate(m);
     } catch (e) {
       lastError = e;
       if (e.message && (e.message.includes('Invalid Google Gemini API key') || e.message.includes('rate limit reached') || e.message.includes('Permission denied'))) {
         throw e;
+      }
+
+      // Self-healing check
+      const rec = extractRecommendedModel(e.message);
+      if (rec && rec !== m) {
+        chrome.storage.local.set({ workingGeminiModel: rec, geminiModel: rec });
+        try {
+          return await attemptGenerate(rec);
+        } catch (recErr) {}
       }
     }
   }

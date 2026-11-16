@@ -118,8 +118,38 @@ document.addEventListener('DOMContentLoaded', async () => {
     'targetLanguage'
   ]);
 
+  function normalizeGeminiModelName(name) {
+    if (!name || name === 'auto') return 'auto';
+    let cleaned = name.trim().toLowerCase().replace(/^models\//, '');
+    if (cleaned.includes('3.8') && cleaned.includes('flash')) return 'gemini-3.8-flash';
+    if (cleaned.includes('3.8') && cleaned.includes('pro')) return 'gemini-3.8-pro';
+    if (cleaned.includes('3') && cleaned.includes('flash') && !cleaned.includes('2') && !cleaned.includes('1')) return 'gemini-3-flash';
+    if (cleaned.includes('2.5') && cleaned.includes('flash')) return 'gemini-2.5-flash';
+    if (cleaned.includes('2.0') && cleaned.includes('flash')) return 'gemini-2.0-flash';
+    if (cleaned.includes('1.5') && cleaned.includes('flash')) return 'gemini-1.5-flash';
+    cleaned = cleaned.replace(/\s+/g, '-');
+    return cleaned;
+  }
+
   if (storage.geminiApiKey) inputGeminiKey.value = storage.geminiApiKey;
-  if (storage.geminiModel && selectGeminiModel) selectGeminiModel.value = storage.geminiModel;
+  if (storage.geminiModel && selectGeminiModel) {
+    const norm = normalizeGeminiModelName(storage.geminiModel);
+    let matched = false;
+    for (const opt of selectGeminiModel.options) {
+      if (opt.value === norm || opt.value === storage.geminiModel) {
+        opt.selected = true;
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) {
+      const opt = document.createElement('option');
+      opt.value = norm;
+      opt.textContent = `⚡ ${norm}`;
+      opt.selected = true;
+      selectGeminiModel.appendChild(opt);
+    }
+  }
   if (storage.targetLanguage && selectTargetLanguage) selectTargetLanguage.value = storage.targetLanguage;
   if (storage.geminiWebUrl) APP_URLS.gemini = storage.geminiWebUrl;
   if (storage.customEndpoint) {
@@ -1224,7 +1254,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   btnSaveSettings.addEventListener('click', async () => {
     const geminiApiKey = inputGeminiKey.value.trim();
-    const geminiModel = selectGeminiModel ? selectGeminiModel.value : 'auto';
+    const rawModel = selectGeminiModel ? selectGeminiModel.value : 'auto';
+    const geminiModel = normalizeGeminiModelName(rawModel);
     const targetLanguage = selectTargetLanguage ? selectTargetLanguage.value : 'English';
     const customEndpoint = inputCustomUrl.value.trim();
     const defaultEngine = selectDefaultEngine.value;
@@ -1232,6 +1263,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (customEndpoint) {
       APP_URLS.custom = customEndpoint;
     }
+
+    // Clear old cached working model so the new setting takes effect immediately
+    await chrome.storage.local.remove(['workingGeminiModel']);
 
     await chrome.storage.local.set({
       geminiApiKey,
