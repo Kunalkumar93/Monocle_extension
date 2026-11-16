@@ -479,6 +479,49 @@ body {
   line-height: 1.3;
 }
 
+/* PDF Companion Helper Banner */
+.pdf-companion-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 8px;
+  padding: 6px 10px;
+  margin: 2px 0 4px 0;
+  font-size: 11px;
+  color: #fca5a5;
+  animation: contextSlide 0.15s ease-out;
+}
+.pdf-banner-icon {
+  font-size: 15px;
+  flex-shrink: 0;
+}
+.pdf-banner-text {
+  flex: 1;
+  line-height: 1.35;
+  color: #fecaca;
+}
+.pdf-banner-text strong {
+  color: #ffffff;
+}
+.btn-pdf-grab {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  border: none;
+  color: #ffffff;
+  padding: 4px 9px;
+  border-radius: 6px;
+  font-size: 10.5px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+.btn-pdf-grab:hover {
+  transform: scale(1.04);
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
+}
+
 /* Context Magic Bar */
 .context-bar {
   background: rgba(19, 22, 32, 0.95);

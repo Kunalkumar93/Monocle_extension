@@ -89,6 +89,16 @@
         <span class="context-label">📌 Selected Context from Page</span>
         <button class="context-dismiss" id="btn-dismiss-context">✕</button>
       </div>
+
+      <!-- PDF Document Helper Banner (Visible when active tab is a PDF) -->
+      <div class="pdf-companion-banner" id="pdf-companion-banner" style="display: none;">
+        <span class="pdf-banner-icon">📕</span>
+        <div class="pdf-banner-text">
+          <span><strong>PDF Document:</strong> Highlight text and press <strong>Ctrl+C</strong> (or Right-Click → <em>Monocle: Quick Explain</em>).</span>
+        </div>
+        <button class="btn-pdf-grab" id="btn-pdf-grab" title="Grab copied text from clipboard">📋 Grab Selection</button>
+      </div>
+
       <div class="context-snippet" id="context-snippet">No text selected yet. Highlight any text in your article!</div>
       <div class="quick-prompts">
         <button class="chip-btn chip-custom-prompt" id="btn-chip-custom" title="Ask any custom prompt with this selection (e.g. Write working code, fix, refactor)">✨ Custom Prompt</button>

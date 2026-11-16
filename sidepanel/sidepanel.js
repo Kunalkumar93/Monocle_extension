@@ -18,6 +18,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   const fileAccessBanner = document.getElementById('file-access-banner');
   const btnOpenFileSettings = document.getElementById('btn-open-file-settings');
   const btnSyncClipboard = document.getElementById('btn-sync-clipboard');
+  const pdfCompanionBanner = document.getElementById('pdf-companion-banner');
+  const btnPdfGrab = document.getElementById('btn-pdf-grab');
   const btnChipCustom = document.getElementById('btn-chip-custom');
   const contextCustomPromptBox = document.getElementById('context-custom-prompt-box');
   const customPromptInput = document.getElementById('custom-prompt-input');
@@ -130,9 +132,42 @@ document.addEventListener('DOMContentLoaded', async () => {
   const initialEngine = storage.lastEngine || storage.defaultEngine || 'fast-ai';
   switchEngine(initialEngine);
 
-  // Check if context text is available
+  // Check if context text is available or pending action
   if (storage.currentContext && storage.currentContext.text) {
     updateContextDisplay(storage.currentContext.text);
+
+    if (storage.currentContext.pendingAction) {
+      const action = storage.currentContext.pendingAction;
+      chrome.storage.local.set({
+        currentContext: { ...storage.currentContext, pendingAction: null }
+      });
+
+      if (action === 'EXPLAIN') {
+        switchEngine('fast-ai');
+        const prompt = `Please provide a crystal-clear, structured explanation of the following excerpt.\n\nStructure your answer as:\n### 💡 Plain-English Summary\n1 to 2 clear, accessible sentences anyone can understand.\n\n### 🔍 Key Concepts & Takeaways\n• 2 to 3 bullet points breaking down what it means and how it works.\n\nExcerpt:\n"""\n${storage.currentContext.text}\n"""`;
+        sendMessage(prompt, false, `⚡ Quick Explanation of selected excerpt`);
+      } else if (action === 'TRANSLATE') {
+        switchEngine('fast-ai');
+        const targetLang = selectTargetLanguage ? selectTargetLanguage.value : 'English';
+        const prompt = `Please provide a high-precision translation of the following excerpt into ${targetLang}.\n\nStructure your response cleanly as:\n### 🌐 Translation (${targetLang})\n[Provide the fluent, natural translation here]\n\n### 🔍 Key Vocabulary & Nuance Notes\n• 2 to 3 notable terms or nuances explained in ${targetLang}.\n\nExcerpt:\n"""\n${storage.currentContext.text}\n"""`;
+        sendMessage(prompt, false, `🌐 Translation to ${targetLang}`, false, null, true);
+      } else if (action === 'CUSTOM_PROMPT') {
+        if (activeEngine === 'fast-ai') {
+          if (chatInput) {
+            chatInput.focus();
+            chatInput.placeholder = 'Type custom prompt for selection...';
+            chatInput.classList.add('input-highlight-pulse');
+            setTimeout(() => chatInput.classList.remove('input-highlight-pulse'), 1500);
+          }
+        } else {
+          showContextCustomPromptBox();
+        }
+      } else if (action === 'TLDR') {
+        setTimeout(() => {
+          if (btnTldrPage) btnTldrPage.click();
+        }, 300);
+      }
+    }
   }
 
   // Check if there is a fresh unhandled snip payload (< 2 minutes old)
@@ -299,7 +334,34 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  // Wire Sync Copied Text button (reads system clipboard)
+  // Wire PDF Grab Selection button
+  if (btnPdfGrab) {
+    btnPdfGrab.addEventListener('click', async () => {
+      try {
+        const clipText = await navigator.clipboard.readText();
+        if (clipText && clipText.trim()) {
+          const trimmed = clipText.trim();
+          updateContextDisplay(trimmed);
+          if (currentPageData && currentPageData.isPdf) {
+            currentPageData.text = trimmed;
+          }
+          chrome.storage.local.set({
+            currentContext: {
+              text: trimmed,
+              title: currentPageData?.title || 'PDF Document Text',
+              url: currentPageData?.url || '',
+              timestamp: Date.now()
+            }
+          });
+          showToast(`📋 Grabbed ${trimmed.length} characters from PDF!`);
+        } else {
+          showToast('Clipboard is empty. Highlight text in PDF & press Ctrl+C first.');
+        }
+      } catch (err) {
+        showToast('Highlight text in PDF & press Ctrl+C, then click Grab Selection.');
+      }
+    });
+  }
   if (btnSyncClipboard) {
     btnSyncClipboard.addEventListener('click', async () => {
       try {
@@ -382,7 +444,38 @@ document.addEventListener('DOMContentLoaded', async () => {
         pageTitleDisplay.title = `${docName} (Chrome Native PDF Viewer)`;
         pageReadTime.textContent = '📕 PDF Document';
         pageReadTime.style.display = 'inline-block';
+
+        if (pdfCompanionBanner) {
+          pdfCompanionBanner.style.display = 'flex';
+        }
+
+        // Auto-check clipboard for PDF selection
+        try {
+          const clipText = await navigator.clipboard.readText();
+          if (clipText && clipText.trim()) {
+            const trimmed = clipText.trim();
+            if (trimmed.length > 1 && trimmed.length < 50000 && trimmed !== currentContextText) {
+              updateContextDisplay(trimmed);
+              currentPageData.text = trimmed;
+              chrome.storage.local.set({
+                currentContext: {
+                  text: trimmed,
+                  title: docName,
+                  url: tab.url,
+                  timestamp: Date.now()
+                }
+              });
+            }
+          }
+        } catch (clipErr) {
+          // Clipboard read not permitted yet or empty
+        }
+
         return;
+      } else {
+        if (pdfCompanionBanner) {
+          pdfCompanionBanner.style.display = 'none';
+        }
       }
 
       // 1. Sync highlighted selection
@@ -604,9 +697,24 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 1-Click Multilingual Translation Chip
   if (btnChipTranslate) {
-    btnChipTranslate.addEventListener('click', () => {
+    btnChipTranslate.addEventListener('click', async () => {
+      if (!currentContextText && currentPageData?.isPdf) {
+        try {
+          const clip = await navigator.clipboard.readText();
+          if (clip && clip.trim()) {
+            const trimmed = clip.trim();
+            updateContextDisplay(trimmed);
+            currentPageData.text = trimmed;
+          }
+        } catch (e) {}
+      }
+
       if (!currentContextText) {
-        showToast('Please select text on the page first!');
+        if (currentPageData?.isPdf) {
+          showToast('📕 In PDF: Highlight text & press Ctrl+C, or Right-Click → Monocle: Translate!');
+        } else {
+          showToast('Please select text on the page first!');
+        }
         return;
       }
       const targetLang = selectTargetLanguage ? selectTargetLanguage.value : 'English';
@@ -623,7 +731,27 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Prompt Chips Click
   chipButtons.forEach((chip) => {
-    chip.addEventListener('click', () => {
+    chip.addEventListener('click', async () => {
+      if (!currentContextText && currentPageData?.isPdf) {
+        try {
+          const clip = await navigator.clipboard.readText();
+          if (clip && clip.trim()) {
+            const trimmed = clip.trim();
+            updateContextDisplay(trimmed);
+            currentPageData.text = trimmed;
+          }
+        } catch (e) {}
+      }
+
+      if (!currentContextText) {
+        if (currentPageData?.isPdf) {
+          showToast('📕 In PDF: Highlight text & press Ctrl+C (or Right-Click → Monocle: Quick Explain)!');
+        } else {
+          showToast('Please highlight text in your article or document first!');
+        }
+        return;
+      }
+
       const promptPrefix = chip.getAttribute('data-prompt');
       const formatted = `${promptPrefix}\n\n"${currentContextText}"`;
 
@@ -965,8 +1093,29 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
 
       port.onDisconnect.addListener(() => {
-        if (!receivedFirstChunk && chrome.runtime.lastError) {
-          botContent.innerHTML = `<p style="color: #f87171;">⚠️ Connection interrupted: ${chrome.runtime.lastError.message}</p>`;
+        if (!receivedFirstChunk) {
+          // Automatic seamless non-streaming fallback
+          const msgType = isVision ? 'FETCH_GEMINI_VISION' : 'FETCH_GEMINI_EXPLANATION';
+          chrome.runtime.sendMessage({
+            type: msgType,
+            prompt: promptText,
+            text: currentContextText,
+            base64Image: base64Image
+          }, (res) => {
+            if (res && res.success && res.text) {
+              botContent.innerHTML = renderMarkdown(res.text);
+              chatMessages.scrollTop = chatMessages.scrollHeight;
+            } else {
+              const errMsg = (res && res.error) || (chrome.runtime.lastError && chrome.runtime.lastError.message) || 'Connection interrupted. Check settings or refresh.';
+              botContent.innerHTML = `
+                <p style="color: #f87171;">⚠️ ${errMsg}</p>
+                <p style="font-size: 11.5px; margin-top: 4px; color: #9ca3af;">
+                  Check your free API key in <strong>⚙️ Settings</strong>.
+                </p>
+              `;
+              chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+          });
         }
       });
 

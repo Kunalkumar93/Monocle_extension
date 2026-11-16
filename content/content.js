@@ -1113,8 +1113,22 @@
     port.onDisconnect.addListener(() => {
       activeStreamPort = null;
       if (!receivedFirstChunk) {
-        const errMsg = (chrome.runtime.lastError && chrome.runtime.lastError.message) || 'Stream disconnected. Check settings or refresh.';
-        setElementHTML(contentEl, `<p style="color: #f87171;">⚠️ ${errMsg}</p>`);
+        // Fallback to standard FETCH_GEMINI_EXPLANATION if stream disconnected before emitting tokens
+        safeSendMessage(
+          {
+            type: 'FETCH_GEMINI_EXPLANATION',
+            prompt: isTranslation ? `Translate into ${currentTargetLanguage}` : promptPrefix,
+            text: currentSelectedText
+          },
+          (response) => {
+            if (response && response.success && response.text) {
+              setElementHTML(contentEl, renderMarkdown(response.text));
+            } else {
+              const errMsg = (response && response.error) || (chrome.runtime.lastError && chrome.runtime.lastError.message) || 'Stream disconnected. Check settings or refresh.';
+              setElementHTML(contentEl, `<p style="color: #f87171;">⚠️ ${errMsg}</p>`);
+            }
+          }
+        );
       }
     });
 
