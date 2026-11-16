@@ -105,7 +105,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   let activeEngine = 'fast-ai';
   let currentContextText = '';
 
-  // 1. Load User Settings & Initial State
+  // 1. Auto-migrate deprecated models (2.5, 2.0, 1.5) to gemini-3.8-flash
+  const modelCheck = await chrome.storage.local.get(['geminiModel', 'workingGeminiModel']);
+  const modelUpdates = {};
+  if (!modelCheck.geminiModel || modelCheck.geminiModel.includes('2.5') || modelCheck.geminiModel.includes('2.0') || modelCheck.geminiModel.includes('1.5') || modelCheck.geminiModel === 'auto') {
+    modelUpdates.geminiModel = 'gemini-3.8-flash';
+  }
+  if (!modelCheck.workingGeminiModel || modelCheck.workingGeminiModel.includes('2.5') || modelCheck.workingGeminiModel.includes('2.0') || modelCheck.workingGeminiModel.includes('1.5')) {
+    modelUpdates.workingGeminiModel = 'gemini-3.8-flash';
+  }
+  if (Object.keys(modelUpdates).length > 0) {
+    await chrome.storage.local.set(modelUpdates);
+  }
+
+  // Load User Settings & Initial State
   const storage = await chrome.storage.local.get([
     'geminiApiKey',
     'geminiModel',
@@ -119,30 +132,32 @@ document.addEventListener('DOMContentLoaded', async () => {
   ]);
 
   function normalizeGeminiModelName(name) {
-    if (!name || name === 'auto') return 'auto';
+    if (!name || name === 'auto') return 'gemini-3.8-flash';
     let cleaned = name.trim().toLowerCase().replace(/^models\//, '');
-    if (cleaned.includes('3.8') && cleaned.includes('flash')) return 'gemini-3.8-flash';
     if (cleaned.includes('3.8') && cleaned.includes('pro')) return 'gemini-3.8-pro';
-    if (cleaned.includes('3') && cleaned.includes('flash') && !cleaned.includes('2') && !cleaned.includes('1')) return 'gemini-3-flash';
-    if (cleaned.includes('2.5') && cleaned.includes('flash')) return 'gemini-2.5-flash';
-    if (cleaned.includes('2.0') && cleaned.includes('flash')) return 'gemini-2.0-flash';
-    if (cleaned.includes('1.5') && cleaned.includes('flash')) return 'gemini-1.5-flash';
+    if (cleaned.includes('3.8') && cleaned.includes('flash')) return 'gemini-3.8-flash';
+    if (cleaned.includes('3') && cleaned.includes('flash')) return 'gemini-3-flash';
+    // Map older deprecated models directly to gemini-3.8-flash
+    if (cleaned.includes('2.5') || cleaned.includes('2.0') || cleaned.includes('1.5')) {
+      return 'gemini-3.8-flash';
+    }
     cleaned = cleaned.replace(/\s+/g, '-');
-    return cleaned;
+    return cleaned || 'gemini-3.8-flash';
   }
 
   if (storage.geminiApiKey) inputGeminiKey.value = storage.geminiApiKey;
-  if (storage.geminiModel && selectGeminiModel) {
-    const norm = normalizeGeminiModelName(storage.geminiModel);
+  if (selectGeminiModel) {
+    const rawStored = storage.geminiModel || 'gemini-3.8-flash';
+    const norm = normalizeGeminiModelName(rawStored);
     let matched = false;
     for (const opt of selectGeminiModel.options) {
-      if (opt.value === norm || opt.value === storage.geminiModel) {
+      if (opt.value === norm) {
         opt.selected = true;
         matched = true;
         break;
       }
     }
-    if (!matched) {
+    if (!matched && !norm.includes('2.5') && !norm.includes('2.0') && !norm.includes('1.5')) {
       const opt = document.createElement('option');
       opt.value = norm;
       opt.textContent = `⚡ ${norm}`;
@@ -1234,17 +1249,26 @@ document.addEventListener('DOMContentLoaded', async () => {
         geminiKeyStatus.style.color = '#34d399';
         geminiKeyStatus.textContent = `✅ Connected! Found ${res.models.length} active models on ${res.version}.`;
 
-        // Repopulate select dropdown with user's verified models
-        const currentVal = selectGeminiModel.value;
-        selectGeminiModel.innerHTML = '<option value="auto">✨ Auto-detect Best Available (Recommended)</option>';
+        // Repopulate select dropdown with user's verified models (excluding retired models)
+        selectGeminiModel.innerHTML = `
+          <option value="gemini-3.8-flash">⚡ Gemini 3.8 Flash (Recommended)</option>
+          <option value="gemini-3-flash">🚀 Gemini 3 Flash</option>
+          <option value="gemini-3.8-pro">🧠 Gemini 3.8 Pro</option>
+          <option value="auto">✨ Auto-detect Best Available</option>
+        `;
 
-        res.models.forEach(m => {
-          const opt = document.createElement('option');
-          opt.value = m;
-          opt.textContent = m;
-          if (m === currentVal) opt.selected = true;
-          selectGeminiModel.appendChild(opt);
-        });
+        res.models
+          .filter(m => !m.includes('2.5') && !m.includes('2.0') && !m.includes('1.5'))
+          .forEach(m => {
+            const clean = normalizeGeminiModelName(m);
+            const exists = Array.from(selectGeminiModel.options).some(o => o.value === clean);
+            if (!exists) {
+              const opt = document.createElement('option');
+              opt.value = clean;
+              opt.textContent = clean;
+              selectGeminiModel.appendChild(opt);
+            }
+          });
       } else {
         geminiKeyStatus.style.color = '#f87171';
         geminiKeyStatus.textContent = `⚠️ ${(res && res.error) || 'Could not verify API key.'}`;

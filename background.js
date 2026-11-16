@@ -5,6 +5,25 @@ chrome.sidePanel
   ?.setPanelBehavior({ openPanelOnActionClick: true })
   .catch((err) => console.log('Panel behavior notice:', err));
 
+// Auto-migrate any deprecated model references (2.5, 2.0, 1.5) to gemini-3.8-flash
+function migrateDeprecatedModels() {
+  chrome.storage.local.get(['geminiModel', 'workingGeminiModel'], (data) => {
+    const updates = {};
+    if (!data.geminiModel || data.geminiModel.includes('2.5') || data.geminiModel.includes('2.0') || data.geminiModel.includes('1.5') || data.geminiModel === 'auto') {
+      updates.geminiModel = 'gemini-3.8-flash';
+    }
+    if (!data.workingGeminiModel || data.workingGeminiModel.includes('2.5') || data.workingGeminiModel.includes('2.0') || data.workingGeminiModel.includes('1.5')) {
+      updates.workingGeminiModel = 'gemini-3.8-flash';
+    }
+    if (Object.keys(updates).length > 0) {
+      chrome.storage.local.set(updates);
+    }
+  });
+}
+migrateDeprecatedModels();
+chrome.runtime.onInstalled.addListener(migrateDeprecatedModels);
+chrome.runtime.onStartup?.addListener(migrateDeprecatedModels);
+
 // Context Menu Setup
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
@@ -359,7 +378,7 @@ async function handleStreamingRequest(request, onChunk, signal) {
         ]
       }
     ];
-    return await streamGeminiContents(geminiApiKey.trim(), visionPayload, geminiModel, onChunk, signal);
+    return await streamGeminiContents(geminiApiKey.trim(), visionPayload, geminiModel, onChunk, signal, request.prompt, cleanBase64);
   }
 
   // 2. Multilingual Translation or Text Prompt
@@ -437,18 +456,21 @@ CRITICAL INSTRUCTIONS FOR GENERAL QUERIES:
   }]
 };
 
+const MONOCLE_SYSTEM_TEXT = MONOCLE_SYSTEM_INSTRUCTION.parts[0].text;
+
 // Helper: Normalize model names to avoid formatting issues
 function normalizeGeminiModelName(name) {
-  if (!name || name === 'auto') return 'auto';
+  if (!name || name === 'auto') return 'gemini-3.8-flash';
   let cleaned = name.trim().toLowerCase().replace(/^models\//, '');
-  if (cleaned.includes('3.8') && cleaned.includes('flash')) return 'gemini-3.8-flash';
   if (cleaned.includes('3.8') && cleaned.includes('pro')) return 'gemini-3.8-pro';
-  if (cleaned.includes('3') && cleaned.includes('flash') && !cleaned.includes('2') && !cleaned.includes('1')) return 'gemini-3-flash';
-  if (cleaned.includes('2.5') && cleaned.includes('flash')) return 'gemini-2.5-flash';
-  if (cleaned.includes('2.0') && cleaned.includes('flash')) return 'gemini-2.0-flash';
-  if (cleaned.includes('1.5') && cleaned.includes('flash')) return 'gemini-1.5-flash';
+  if (cleaned.includes('3.8') && cleaned.includes('flash')) return 'gemini-3.8-flash';
+  if (cleaned.includes('3') && cleaned.includes('flash')) return 'gemini-3-flash';
+  // Fully intercept and upgrade all deprecated 2.5, 2.0, 1.5 models to gemini-3.8-flash
+  if (cleaned.includes('2.5') || cleaned.includes('2.0') || cleaned.includes('1.5')) {
+    return 'gemini-3.8-flash';
+  }
   cleaned = cleaned.replace(/\s+/g, '-');
-  return cleaned;
+  return cleaned || 'gemini-3.8-flash';
 }
 
 // Helper: Extract recommended replacement model from Google deprecation error string
@@ -462,13 +484,11 @@ function extractRecommendedModel(errMessage) {
   return null;
 }
 
-// Default prioritized candidate list for Google Gemini in 2026
+// Default prioritized candidate list for Google Gemini in 2026 (strictly active models)
 const DEFAULT_GEMINI_CANDIDATES = [
   'gemini-3.8-flash',
   'gemini-3-flash',
-  'gemini-2.5-flash',
-  'gemini-2.0-flash',
-  'gemini-1.5-flash'
+  'gemini-3.8-pro'
 ];
 
 // Helper: Classify fatal Google API errors (so we don't waste time retrying)
@@ -492,14 +512,168 @@ function checkFatalGeminiError(status, errMessage) {
   }
 }
 
-// Fast, resilient SSE Stream Engine for Gemini with dynamic fallback & self-healing
-async function streamGeminiContents(apiKey, contentsPayload, preferredModel, onChunk, signal, fallbackPromptText = '') {
+// Fast, resilient SSE Stream Engine for Gemini with Interactions API and dynamic fallback
+async function streamGeminiContents(apiKey, contentsPayload, preferredModel, onChunk, signal, fallbackPromptText = '', imageBase64 = null) {
   const cleanKey = (apiKey || '').trim();
   if (!cleanKey) {
     throw new Error('Please enter your free Google Gemini API key in Settings (⚙️).');
   }
 
-  async function attemptStream(modelName) {
+  // 1. Primary: Google Interactions API (Official 2026 Gemini 3.8+ endpoint)
+  async function attemptInteractionsStream(modelName) {
+    const cleanName = normalizeGeminiModelName(modelName);
+    const url = `https://generativelanguage.googleapis.com/v1beta/interactions?key=${cleanKey}`;
+
+    let inputPayload;
+    if (imageBase64) {
+      inputPayload = [
+        {
+          type: 'text',
+          text: fallbackPromptText || 'Analyze this technical diagram, chart, or mathematical formula. Break down its components, flow, meaning, and key concepts in clear, structured markdown:'
+        },
+        {
+          type: 'image',
+          mime_type: 'image/png',
+          data: imageBase64
+        }
+      ];
+    } else {
+      inputPayload = fallbackPromptText || contentsPayload?.[0]?.parts?.[0]?.text || '';
+    }
+
+    const requestBody = {
+      model: cleanName,
+      input: inputPayload,
+      system_instruction: MONOCLE_SYSTEM_TEXT,
+      stream: true
+    };
+
+    const streamController = new AbortController();
+    const timer = setTimeout(() => streamController.abort(), 10000);
+    const onParentAbort = () => streamController.abort();
+    if (signal) signal.addEventListener('abort', onParentAbort);
+
+    let res;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': cleanKey
+        },
+        body: JSON.stringify(requestBody),
+        signal: streamController.signal
+      });
+    } catch (fetchErr) {
+      clearTimeout(timer);
+      if (signal) signal.removeEventListener('abort', onParentAbort);
+      if (signal?.aborted) throw new Error('Request was cancelled.');
+      throw new Error(`Connection timeout: ${fetchErr.message}`);
+    }
+
+    clearTimeout(timer);
+    if (signal) signal.removeEventListener('abort', onParentAbort);
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => null);
+      const errMsg = (errData && errData.error && errData.error.message) || `HTTP ${res.status}`;
+      checkFatalGeminiError(res.status, errMsg);
+      throw new Error(errMsg);
+    }
+
+    if (!res.body) throw new Error('Response body stream is unavailable.');
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    let emittedAny = false;
+
+    try {
+      while (true) {
+        if (signal?.aborted) {
+          reader.cancel();
+          break;
+        }
+
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('data:')) {
+            const jsonStr = trimmed.slice(5).trim();
+            if (!jsonStr || jsonStr === '[DONE]') continue;
+            try {
+              const parsed = JSON.parse(jsonStr);
+              if (parsed.error) {
+                checkFatalGeminiError(parsed.error.code || 400, parsed.error.message);
+                throw new Error(parsed.error.message || 'Stream candidate error');
+              }
+
+              let chunk = null;
+              if (parsed.delta) {
+                if (typeof parsed.delta === 'string') {
+                  chunk = parsed.delta;
+                } else if (parsed.delta.content) {
+                  chunk = typeof parsed.delta.content === 'string' ? parsed.delta.content : parsed.delta.content.text;
+                } else if (parsed.delta.text) {
+                  chunk = parsed.delta.text;
+                } else if (parsed.delta.parts && parsed.delta.parts[0]?.text) {
+                  chunk = parsed.delta.parts[0].text;
+                }
+              } else if (parsed.content?.text) {
+                chunk = parsed.content.text;
+              } else if (parsed.text) {
+                chunk = parsed.text;
+              } else if (parsed.candidates?.[0]?.content?.parts?.[0]?.text) {
+                chunk = parsed.candidates[0].content.parts[0].text;
+              }
+
+              if (chunk) {
+                emittedAny = true;
+                onChunk(chunk);
+              }
+            } catch (err) {
+              if (err.message && !err.message.includes('JSON')) throw err;
+            }
+          }
+        }
+      }
+
+      if (buffer.trim().startsWith('data:')) {
+        const jsonStr = buffer.trim().slice(5).trim();
+        if (jsonStr && jsonStr !== '[DONE]') {
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const chunk = parsed.delta?.text || parsed.delta?.content?.text || parsed.text || parsed.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (chunk) {
+              emittedAny = true;
+              onChunk(chunk);
+            }
+          } catch (e) {}
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    if (emittedAny) {
+      chrome.storage.local.set({
+        workingGeminiModel: cleanName,
+        workingGeminiVersion: 'interactions'
+      });
+      return true;
+    }
+
+    throw new Error(`Empty response from ${cleanName} interactions`);
+  }
+
+  // 2. Secondary: Fallback to streamGenerateContent
+  async function attemptLegacyStream(modelName) {
     const cleanName = normalizeGeminiModelName(modelName);
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanName}:streamGenerateContent?alt=sse&key=${cleanKey}`;
 
@@ -644,35 +818,53 @@ async function streamGeminiContents(apiKey, contentsPayload, preferredModel, onC
     if (!candidateModels.includes(m)) candidateModels.push(m);
   });
 
-  // Try candidate models with self-healing upgrade
+  // Try candidate models with Interactions API and legacy fallback
   let lastError = null;
   const modelsToAttempt = candidateModels.slice(0, 3);
 
   for (const m of modelsToAttempt) {
     if (signal?.aborted) break;
+
+    // 1. Try Interactions API stream
     try {
-      await attemptStream(m);
+      await attemptInteractionsStream(m);
       return true;
-    } catch (err) {
-      lastError = err;
-      if (err.message && (err.message.includes('Invalid Google Gemini API key') || err.message.includes('rate limit reached') || err.message.includes('Permission denied'))) {
-        throw err;
+    } catch (intErr) {
+      if (intErr.message && (intErr.message.includes('Invalid Google Gemini API key') || intErr.message.includes('rate limit reached') || intErr.message.includes('Permission denied'))) {
+        throw intErr;
       }
+      console.warn(`Interactions stream with ${m} failed: ${intErr.message}. Trying legacy stream...`);
 
-      // Self-healing: Check if Google provided a replacement model recommendation (e.g. models/gemini-3.8-flash)
-      const rec = extractRecommendedModel(err.message);
-      if (rec && rec !== m) {
-        console.log(`Self-healing: Auto-switching from ${m} to ${rec}`);
-        chrome.storage.local.set({ workingGeminiModel: rec, geminiModel: rec });
-        try {
-          await attemptStream(rec);
-          return true;
-        } catch (recErr) {
-          console.warn(`Recommended model ${rec} attempt failed:`, recErr.message);
+      // 2. Try legacy streamGenerateContent
+      try {
+        await attemptLegacyStream(m);
+        return true;
+      } catch (err) {
+        lastError = err;
+        if (err.message && (err.message.includes('Invalid Google Gemini API key') || err.message.includes('rate limit reached') || err.message.includes('Permission denied'))) {
+          throw err;
         }
-      }
 
-      console.warn(`Streaming with ${m} failed: ${err.message}. Trying next candidate...`);
+        // Self-healing: Check if Google provided a replacement model recommendation (e.g. models/gemini-3.8-flash)
+        const rec = extractRecommendedModel(err.message) || extractRecommendedModel(intErr.message);
+        if (rec && rec !== m) {
+          console.log(`Self-healing: Auto-switching from ${m} to ${rec}`);
+          chrome.storage.local.set({ workingGeminiModel: rec, geminiModel: rec });
+          try {
+            await attemptInteractionsStream(rec);
+            return true;
+          } catch (recErr) {
+            try {
+              await attemptLegacyStream(rec);
+              return true;
+            } catch (recErr2) {
+              console.warn(`Recommended model ${rec} attempt failed:`, recErr2.message);
+            }
+          }
+        }
+
+        console.warn(`Streaming with ${m} failed: ${err.message}. Trying next candidate...`);
+      }
     }
   }
 
@@ -695,7 +887,7 @@ async function streamGeminiContents(apiKey, contentsPayload, preferredModel, onC
   throw lastError || new Error('Could not stream answer from Gemini. Check API key in Settings.');
 }
 
-// Vision Analysis using Gemini Multimodal
+// Vision Analysis using Gemini Multimodal (Interactions API with generateContent fallback)
 async function handleGeminiVision(prompt, base64Image) {
   const { geminiApiKey, geminiModel, workingGeminiModel } = await chrome.storage.local.get(['geminiApiKey', 'geminiModel', 'workingGeminiModel']);
 
@@ -705,28 +897,6 @@ async function handleGeminiVision(prompt, base64Image) {
 
   const cleanKey = geminiApiKey.trim();
   const cleanBase64 = base64Image.replace(/^data:image\/[a-z]+;base64,/, '');
-
-  const payload = {
-    contents: [
-      {
-        parts: [
-          {
-            inlineData: {
-              mimeType: 'image/png',
-              data: cleanBase64
-            }
-          },
-          {
-            text: prompt || 'Analyze this technical diagram, chart, or mathematical formula. Break down its components, flow, meaning, and key concepts in clear, structured markdown:'
-          }
-        ]
-      }
-    ],
-    generationConfig: {
-      temperature: 0.2,
-      maxOutputTokens: 2048
-    }
-  };
 
   const normPref = normalizeGeminiModelName(geminiModel);
   const normWorking = normalizeGeminiModelName(workingGeminiModel);
@@ -738,10 +908,96 @@ async function handleGeminiVision(prompt, base64Image) {
     if (!candidates.includes(m)) candidates.push(m);
   });
 
+  const visionPrompt = prompt || 'Analyze this technical diagram, chart, or mathematical formula. Break down its components, flow, meaning, and key concepts in clear, structured markdown:';
+
   let lastError = null;
   for (const model of candidates.slice(0, 3)) {
+    const cleanName = normalizeGeminiModelName(model);
+
+    // 1. Try Interactions API with multimodal input
     try {
-      const cleanName = normalizeGeminiModelName(model);
+      const interactionsUrl = `https://generativelanguage.googleapis.com/v1beta/interactions?key=${cleanKey}`;
+      const interactionsBody = {
+        model: cleanName,
+        input: [
+          { type: 'text', text: visionPrompt },
+          { type: 'image', mime_type: 'image/png', data: cleanBase64 }
+        ],
+        system_instruction: MONOCLE_SYSTEM_TEXT
+      };
+
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 12000);
+
+      const res = await fetch(interactionsUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': cleanKey
+        },
+        body: JSON.stringify(interactionsBody),
+        signal: ctrl.signal
+      }).finally(() => clearTimeout(timer));
+
+      const data = await res.json().catch(() => null);
+      if (res.ok) {
+        if (data?.output_text) {
+          chrome.storage.local.set({ workingGeminiModel: cleanName });
+          return data.output_text;
+        }
+        if (Array.isArray(data?.steps)) {
+          let combined = '';
+          for (const step of data.steps) {
+            if (Array.isArray(step.content)) {
+              for (const item of step.content) {
+                if (item.text) combined += item.text;
+              }
+            } else if (step.text) combined += step.text;
+          }
+          if (combined.trim()) {
+            chrome.storage.local.set({ workingGeminiModel: cleanName });
+            return combined;
+          }
+        }
+        if (data?.candidates?.[0]?.content?.parts?.[0]?.text) {
+          chrome.storage.local.set({ workingGeminiModel: cleanName });
+          return data.candidates[0].content.parts[0].text;
+        }
+      } else {
+        const errMsg = (data && data.error && data.error.message) || `HTTP ${res.status}`;
+        checkFatalGeminiError(res.status, errMsg);
+      }
+    } catch (intErr) {
+      if (intErr.message && (intErr.message.includes('Invalid Google Gemini API key') || intErr.message.includes('rate limit reached') || intErr.message.includes('Permission denied'))) {
+        throw intErr;
+      }
+      console.warn(`Interactions vision with ${cleanName} failed: ${intErr.message}. Trying legacy vision...`);
+    }
+
+    // 2. Fallback: Legacy generateContent
+    try {
+      const payload = {
+        contents: [
+          {
+            parts: [
+              {
+                inlineData: {
+                  mimeType: 'image/png',
+                  data: cleanBase64
+                }
+              },
+              {
+                text: visionPrompt
+              }
+            ]
+          }
+        ],
+        generationConfig: {
+          temperature: 0.2,
+          maxOutputTokens: 2048
+        }
+      };
+
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanName}:generateContent?key=${cleanKey}`;
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 12000);
@@ -758,7 +1014,6 @@ async function handleGeminiVision(prompt, base64Image) {
         const errMsg = (data && data.error && data.error.message) || `HTTP ${res.status}`;
         checkFatalGeminiError(res.status, errMsg);
 
-        // Self-healing check for vision
         const rec = extractRecommendedModel(errMsg);
         if (rec && rec !== cleanName) {
           chrome.storage.local.set({ workingGeminiModel: rec, geminiModel: rec });
@@ -802,11 +1057,9 @@ async function testGeminiKey(apiKey) {
   function rankModel(name) {
     const l = name.toLowerCase();
     if (l.includes('3.8-flash')) return 100;
-    if (l.includes('3.8')) return 95;
+    if (l.includes('3.8-pro')) return 95;
     if (l.includes('3-flash')) return 90;
     if (l.includes('3')) return 85;
-    if (l.includes('2.5-flash')) return 80;
-    if (l.includes('2.0-flash')) return 70;
     if (l.includes('flash')) return 60;
     if (l.includes('pro')) return 50;
     return 10;
@@ -828,7 +1081,19 @@ async function testGeminiKey(apiKey) {
         const genModels = data.models
           .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent'))
           .map(m => m.name.replace(/^models\//, ''))
-          .filter(name => !name.includes('embedding') && !name.includes('aqa') && !name.includes('imagen'));
+          .filter(name => !name.includes('embedding') && !name.includes('aqa') && !name.includes('imagen'))
+          .filter(name => !name.includes('2.5') && !name.includes('2.0') && !name.includes('1.5'));
+
+        if (!genModels.includes('gemini-3.8-flash')) {
+          genModels.unshift('gemini-3.8-flash');
+        }
+        if (!genModels.includes('gemini-3-flash')) {
+          genModels.push('gemini-3-flash');
+        }
+        if (!genModels.includes('gemini-3.8-pro')) {
+          genModels.push('gemini-3.8-pro');
+        }
+
         genModels.sort((a, b) => rankModel(b) - rankModel(a));
         return { models: genModels, version: ver };
       }
@@ -877,11 +1142,77 @@ async function handleGeminiExplanation(userPrompt, selectedText) {
   return generateQuickSmartAnalysis(selectedText, userPrompt);
 }
 
-// High-speed, resilient Non-Streaming Gemini API Caller
+// High-speed, resilient Non-Streaming Gemini API Caller (Interactions API with generateContent fallback)
 async function callGeminiApi(apiKey, fullPrompt, preferredModel) {
   const cleanKey = (apiKey || '').trim();
   if (!cleanKey) throw new Error('Please enter an API key in Settings.');
 
+  // 1. Primary: Interactions API
+  async function attemptInteractions(modelName) {
+    const cleanName = normalizeGeminiModelName(modelName);
+    const url = `https://generativelanguage.googleapis.com/v1beta/interactions?key=${cleanKey}`;
+    const requestBody = {
+      model: cleanName,
+      input: fullPrompt,
+      system_instruction: MONOCLE_SYSTEM_TEXT
+    };
+
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 12000);
+
+    let res;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': cleanKey
+        },
+        body: JSON.stringify(requestBody),
+        signal: ctrl.signal
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      const errMsg = (data && data.error && data.error.message) || `HTTP ${res.status}`;
+      checkFatalGeminiError(res.status, errMsg);
+      throw new Error(errMsg);
+    }
+
+    if (data?.output_text) {
+      chrome.storage.local.set({ workingGeminiModel: cleanName });
+      return data.output_text;
+    }
+
+    if (Array.isArray(data?.steps)) {
+      let combined = '';
+      for (const step of data.steps) {
+        if (Array.isArray(step.content)) {
+          for (const item of step.content) {
+            if (item.text) combined += item.text;
+          }
+        } else if (step.text) {
+          combined += step.text;
+        }
+      }
+      if (combined.trim()) {
+        chrome.storage.local.set({ workingGeminiModel: cleanName });
+        return combined;
+      }
+    }
+
+    if (data?.candidates?.[0]?.content?.parts?.[0]?.text) {
+      chrome.storage.local.set({ workingGeminiModel: cleanName });
+      return data.candidates[0].content.parts[0].text;
+    }
+
+    throw new Error(`Empty response from ${cleanName} interactions`);
+  }
+
+  // 2. Secondary: generateContent fallback
   async function attemptGenerate(modelName) {
     const cleanName = normalizeGeminiModelName(modelName);
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanName}:generateContent?key=${cleanKey}`;
@@ -949,21 +1280,36 @@ async function callGeminiApi(apiKey, fullPrompt, preferredModel) {
 
   let lastError = null;
   for (const m of candidates.slice(0, 3)) {
+    // Try Interactions API first
     try {
-      return await attemptGenerate(m);
-    } catch (e) {
-      lastError = e;
-      if (e.message && (e.message.includes('Invalid Google Gemini API key') || e.message.includes('rate limit reached') || e.message.includes('Permission denied'))) {
-        throw e;
+      return await attemptInteractions(m);
+    } catch (intErr) {
+      if (intErr.message && (intErr.message.includes('Invalid Google Gemini API key') || intErr.message.includes('rate limit reached') || intErr.message.includes('Permission denied'))) {
+        throw intErr;
       }
+      console.warn(`Interactions call with ${m} failed: ${intErr.message}. Trying legacy generateContent...`);
 
-      // Self-healing check
-      const rec = extractRecommendedModel(e.message);
-      if (rec && rec !== m) {
-        chrome.storage.local.set({ workingGeminiModel: rec, geminiModel: rec });
-        try {
-          return await attemptGenerate(rec);
-        } catch (recErr) {}
+      // Try generateContent
+      try {
+        return await attemptGenerate(m);
+      } catch (e) {
+        lastError = e;
+        if (e.message && (e.message.includes('Invalid Google Gemini API key') || e.message.includes('rate limit reached') || e.message.includes('Permission denied'))) {
+          throw e;
+        }
+
+        // Self-healing check
+        const rec = extractRecommendedModel(e.message) || extractRecommendedModel(intErr.message);
+        if (rec && rec !== m) {
+          chrome.storage.local.set({ workingGeminiModel: rec, geminiModel: rec });
+          try {
+            return await attemptInteractions(rec);
+          } catch (recErr) {
+            try {
+              return await attemptGenerate(rec);
+            } catch (recErr2) {}
+          }
+        }
       }
     }
   }
